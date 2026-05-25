@@ -70,9 +70,12 @@ def row_to_dict(row: sqlite3.Row | None) -> dict | None:
         "input_asset_ids_json",
         "input_step_ids_json",
         "input_refs_json",
+        "usage_tags_json",
+        "metadata_json",
+        "suggested_metadata_json",
     ):
         if key in data:
-            default = [] if key.endswith("ids_json") or key == "input_refs_json" else {}
+            default = [] if key.endswith("ids_json") or key in {"input_refs_json", "usage_tags_json"} else {}
             data[key.replace("_json", "")] = from_json(data.pop(key), default)
     return data
 
@@ -288,6 +291,44 @@ def init_db() -> None:
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY(run_id) REFERENCES docx_workflow_runs(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS rag_reference_selections (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                rag_image_id TEXT NOT NULL,
+                filename TEXT DEFAULT '',
+                category TEXT DEFAULT '',
+                scene TEXT DEFAULT '',
+                image_type TEXT DEFAULT '',
+                caption TEXT DEFAULT '',
+                score REAL,
+                usage_tags_json TEXT NOT NULL DEFAULT '[]',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                selected_at TEXT NOT NULL,
+                notes TEXT DEFAULT '',
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS docx_knowledge_candidates (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                run_id TEXT NOT NULL,
+                step_id TEXT NOT NULL,
+                image_path TEXT NOT NULL,
+                rating INTEGER,
+                review_notes TEXT DEFAULT '',
+                suggested_category TEXT DEFAULT '',
+                suggested_scene TEXT DEFAULT '',
+                suggested_image_type TEXT DEFAULT '',
+                suggested_metadata_json TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'pending',
+                created_at TEXT NOT NULL,
+                ingested_rag_image_id TEXT DEFAULT '',
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE,
+                FOREIGN KEY(run_id) REFERENCES docx_workflow_runs(id) ON DELETE CASCADE,
+                FOREIGN KEY(step_id) REFERENCES docx_workflow_steps(id) ON DELETE CASCADE
+            );
             """
         )
         migrate_existing_db(conn)
@@ -301,3 +342,6 @@ def migrate_existing_db(conn: sqlite3.Connection) -> None:
     step_columns = table_columns(conn, "docx_workflow_steps")
     if "input_refs_json" not in step_columns:
         conn.execute("ALTER TABLE docx_workflow_steps ADD COLUMN input_refs_json TEXT NOT NULL DEFAULT '[]'")
+    rag_columns = table_columns(conn, "rag_reference_selections")
+    if rag_columns and "sort_order" not in rag_columns:
+        conn.execute("ALTER TABLE rag_reference_selections ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
