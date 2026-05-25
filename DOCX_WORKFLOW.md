@@ -11,6 +11,12 @@
 
 ### 安装依赖
 
+本项目使用系统 Python 即可，不需要虚拟环境。
+
+原始开发环境下，项目目录中的 `.webdeps/` 已包含所有依赖（通过 `sys.path.insert` 自动加载），无需 `pip install`。
+
+从 Git 克隆的新环境需要手动安装：
+
 ```powershell
 pip install -r requirements.txt
 ```
