@@ -23,6 +23,7 @@ api.txt
 
 # Standalone CLI script (not part of docx workflow)
 generate.py
+asset_library.json
 
 # Office / docx files (not needed for running)
 *.docx

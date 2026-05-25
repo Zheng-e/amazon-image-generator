@@ -1,13 +1,7 @@
 import {
-  ArrowDown,
-  ArrowUp,
-  BadgeCheck,
-  Brain,
-  Database,
   FileImage,
   FlaskConical,
   ImagePlus,
-  Layers3,
   Plus,
   Save,
   Sparkles,
@@ -17,23 +11,6 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 const API = import.meta.env.VITE_API_BASE || "http://localhost:8000";
-
-const OUTPUT_TYPES = [
-  ["output_a", "OUTPUT-A", "商品事实"],
-  ["output_c", "OUTPUT-C", "竞品单图结构"],
-  ["output_d", "OUTPUT-D", "类目视觉规范"],
-];
-
-const FIELD_TYPES = [
-  ["text", "文本"],
-  ["textarea", "长文本"],
-  ["single_select", "单选"],
-  ["multi_select", "多选"],
-  ["number", "数字"],
-  ["boolean", "开关"],
-  ["image_ref", "图片引用"],
-  ["list", "列表"],
-];
 
 const ASSET_TYPE_LABELS = {
   product: "商品",
@@ -58,163 +35,6 @@ async function request(path, options = {}) {
     throw new Error(text || `HTTP ${res.status}`);
   }
   return res.json();
-}
-
-function emptyValue(type) {
-  if (type === "list" || type === "multi_select" || type === "image_ref") return [];
-  if (type === "boolean") return false;
-  if (type === "number") return 0;
-  return "";
-}
-
-function FieldInput({ field, value, onChange }) {
-  const type = field.type || "text";
-  if (type === "textarea") {
-    return <textarea value={value || ""} onChange={(e) => onChange(e.target.value)} placeholder={field.help_text || field.label} />;
-  }
-  if (type === "boolean") {
-    return (
-      <label className="toggle-line">
-        <input type="checkbox" checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
-        <span>{Boolean(value) ? "是" : "否"}</span>
-      </label>
-    );
-  }
-  if (type === "single_select") {
-    return (
-      <select value={value || ""} onChange={(e) => onChange(e.target.value)}>
-        <option value="">未选择</option>
-        {(field.options || []).map((option) => (
-          <option key={option} value={option}>
-            {option}
-          </option>
-        ))}
-      </select>
-    );
-  }
-  if (type === "multi_select") {
-    const selected = Array.isArray(value) ? value : [];
-    return (
-      <div className="check-grid">
-        {(field.options || []).map((option) => (
-          <label key={option}>
-            <input
-              type="checkbox"
-              checked={selected.includes(option)}
-              onChange={(e) => {
-                onChange(e.target.checked ? [...selected, option] : selected.filter((item) => item !== option));
-              }}
-            />
-            {option}
-          </label>
-        ))}
-      </div>
-    );
-  }
-  if (type === "list") {
-    return (
-      <textarea
-        value={Array.isArray(value) ? value.join("\n") : value || ""}
-        onChange={(e) => onChange(e.target.value.split("\n").map((line) => line.trim()).filter(Boolean))}
-        placeholder="每行一项"
-      />
-    );
-  }
-  return <input type={type === "number" ? "number" : "text"} value={value ?? ""} onChange={(e) => onChange(type === "number" ? Number(e.target.value) : e.target.value)} />;
-}
-
-function SchemaBuilder({ schemas, activeType, setActiveType, onSchemaSaved }) {
-  const schema = schemas[activeType];
-  const [draft, setDraft] = useState(schema);
-
-  useEffect(() => setDraft(schema), [schema]);
-  if (!draft) return null;
-
-  const updateField = (index, patch) => {
-    const fields = [...draft.fields];
-    fields[index] = { ...fields[index], ...patch };
-    setDraft({ ...draft, fields });
-  };
-  const moveField = (index, direction) => {
-    const next = index + direction;
-    if (next < 0 || next >= draft.fields.length) return;
-    const fields = [...draft.fields];
-    [fields[index], fields[next]] = [fields[next], fields[index]];
-    setDraft({ ...draft, fields });
-  };
-
-  return (
-    <section className="panel">
-      <div className="section-title">
-        <Layers3 size={18} />
-        <h2>字段配置器</h2>
-      </div>
-      <div className="segmented">
-        {OUTPUT_TYPES.map(([type, code, label]) => (
-          <button key={type} className={activeType === type ? "active" : ""} onClick={() => setActiveType(type)}>
-            {code} · {label}
-          </button>
-        ))}
-      </div>
-      <div className="schema-head">
-        <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
-        <button className="primary" onClick={() => onSchemaSaved(activeType, draft)}>
-          <Save size={16} />
-          保存字段版本
-        </button>
-      </div>
-      <div className="field-list">
-        {draft.fields.map((field, index) => (
-          <div className="field-row" key={`${field.key}-${index}`}>
-            <input title="字段key" value={field.key} onChange={(e) => updateField(index, { key: e.target.value })} />
-            <input title="显示名称" value={field.label} onChange={(e) => updateField(index, { label: e.target.value })} />
-            <select value={field.type} onChange={(e) => updateField(index, { type: e.target.value })}>
-              {FIELD_TYPES.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <label className="mini-check">
-              <input type="checkbox" checked={Boolean(field.required)} onChange={(e) => updateField(index, { required: e.target.checked })} />
-              必填
-            </label>
-            <input title="字段说明" value={field.help_text || ""} onChange={(e) => updateField(index, { help_text: e.target.value })} placeholder="字段说明" />
-            <input
-              title="选项"
-              value={(field.options || []).join(",")}
-              onChange={(e) => updateField(index, { options: e.target.value.split(",").map((item) => item.trim()).filter(Boolean) })}
-              placeholder="选项用逗号分隔"
-            />
-            <button title="上移" onClick={() => moveField(index, -1)}>
-              <ArrowUp size={15} />
-            </button>
-            <button title="下移" onClick={() => moveField(index, 1)}>
-              <ArrowDown size={15} />
-            </button>
-            <button title="删除" onClick={() => setDraft({ ...draft, fields: draft.fields.filter((_, i) => i !== index) })}>
-              <Trash2 size={15} />
-            </button>
-          </div>
-        ))}
-      </div>
-      <button
-        className="ghost"
-        onClick={() =>
-          setDraft({
-            ...draft,
-            fields: [
-              ...draft.fields,
-              { key: `field_${draft.fields.length + 1}`, label: "新字段", type: "text", required: false, help_text: "", options: [], prompt_role: "", validation_rule: "", knowledge_enabled: true },
-            ],
-          })
-        }
-      >
-        <Plus size={16} />
-        添加字段
-      </button>
-    </section>
-  );
 }
 
 function ProjectPanel({ projects, selectedProject, setSelectedProject, onCreate, onDelete }) {
@@ -336,165 +156,6 @@ function AssetPanel({ project, assets, refresh }) {
           </div>
         ))}
       </div>
-    </section>
-  );
-}
-
-function OutputAEditor({ schema, project, refresh }) {
-  const [values, setValues] = useState({});
-  if (!schema) return null;
-  const save = async () => {
-    await request("/api/outputs/product-facts", {
-      method: "POST",
-      body: JSON.stringify({ project_id: project.id, values }),
-    });
-    await refresh();
-  };
-  return (
-    <section className="panel">
-      <div className="section-title">
-        <BadgeCheck size={18} />
-        <h2>OUTPUT-A 填写</h2>
-      </div>
-      <div className="output-grid">
-        {schema.fields.map((field) => (
-          <label key={field.key} className={field.type === "textarea" || field.type === "list" ? "span2" : ""}>
-            <span>
-              {field.label}
-              {field.required ? <b>*</b> : null}
-            </span>
-            <FieldInput field={field} value={values[field.key] ?? emptyValue(field.type)} onChange={(value) => setValues({ ...values, [field.key]: value })} />
-          </label>
-        ))}
-      </div>
-      <button className="primary" onClick={save}>
-        <Save size={16} />
-        保存 OUTPUT-A
-      </button>
-    </section>
-  );
-}
-
-function AnalysisPanel({ project, assets, outputs, refresh }) {
-  const competitorAssets = assets.filter((asset) => asset.asset_type === "competitor");
-  const outputC = outputs.filter((item) => item.output_type === "output_c");
-  const confirmedC = outputC.filter((item) => item.status === "confirmed");
-  const outputD = outputs.filter((item) => item.output_type === "output_d");
-  const [selectedAsset, setSelectedAsset] = useState("");
-  const [selectedC, setSelectedC] = useState([]);
-  const [editing, setEditing] = useState(null);
-  const [editingText, setEditingText] = useState("");
-
-  const analyzeImage = async () => {
-    await request("/api/analysis/competitor-image", {
-      method: "POST",
-      body: JSON.stringify({ project_id: project.id, asset_id: selectedAsset }),
-    });
-    await refresh();
-  };
-  const analyzeCategory = async () => {
-    await request("/api/analysis/category-standard", {
-      method: "POST",
-      body: JSON.stringify({ project_id: project.id, competitor_output_ids: selectedC }),
-    });
-    await refresh();
-  };
-  const saveOutput = async () => {
-    let parsed = {};
-    try {
-      parsed = JSON.parse(editingText || "{}");
-    } catch {
-      window.alert("JSON 格式不正确，请修正后再保存。");
-      return;
-    }
-    await request(`/api/outputs/${editing.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ values: parsed, status: "confirmed", notes: editing.notes || "" }),
-    });
-    setEditing(null);
-    await refresh();
-  };
-
-  return (
-    <section className="panel">
-      <div className="section-title">
-        <Brain size={18} />
-        <h2>竞品分析</h2>
-      </div>
-      <div className="analysis-actions">
-        <select value={selectedAsset} onChange={(e) => setSelectedAsset(e.target.value)}>
-          <option value="">选择一张竞品图</option>
-          {competitorAssets.map((asset) => (
-            <option key={asset.id} value={asset.id}>
-              {asset.original_name}
-            </option>
-          ))}
-        </select>
-        <button className="primary" disabled={!selectedAsset} onClick={analyzeImage}>
-          <Sparkles size={16} />
-          生成 OUTPUT-C
-        </button>
-      </div>
-      <div className="records">
-        {outputC.map((item) => (
-            <button
-              key={item.id}
-              className={item.status === "confirmed" ? "record confirmed" : "record"}
-              onClick={() => {
-                setEditing(item);
-                setEditingText(JSON.stringify(item.values, null, 2));
-              }}
-            >
-            <span>{item.status === "confirmed" ? "已确认" : "待确认"}</span>
-            <strong>OUTPUT-C</strong>
-            <small>{Object.values(item.values || {}).slice(0, 2).join(" / ")}</small>
-          </button>
-        ))}
-      </div>
-      <div className="analysis-actions">
-        <select multiple value={selectedC} onChange={(e) => setSelectedC([...e.target.selectedOptions].map((option) => option.value))}>
-          {confirmedC.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.id.slice(0, 8)} · {Object.values(item.values || {}).slice(0, 2).join(" / ")}
-            </option>
-          ))}
-        </select>
-        <button className="primary" disabled={!selectedC.length} onClick={analyzeCategory}>
-          <Database size={16} />
-          生成 OUTPUT-D
-        </button>
-      </div>
-      <div className="records">
-        {outputD.map((item) => (
-          <button
-            key={item.id}
-            className={item.status === "confirmed" ? "record confirmed" : "record"}
-            onClick={() => {
-              setEditing(item);
-              setEditingText(JSON.stringify(item.values, null, 2));
-            }}
-          >
-            <span>{item.status === "confirmed" ? "已确认" : "待确认"}</span>
-            <strong>OUTPUT-D</strong>
-            <small>{Object.keys(item.values || {}).join(", ")}</small>
-          </button>
-        ))}
-      </div>
-      {editing && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h3>确认 {editing.output_type === "output_c" ? "OUTPUT-C" : "OUTPUT-D"}</h3>
-            <textarea className="json-editor" value={editingText} onChange={(e) => setEditingText(e.target.value)} />
-            <div className="modal-actions">
-              <button onClick={() => setEditing(null)}>取消</button>
-              <button className="primary" onClick={saveOutput}>
-                <Save size={16} />
-                确认保存
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </section>
   );
 }
@@ -888,165 +549,17 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
   );
 }
 
-function GenerationPanel({ project, assets, outputs, runs, refresh }) {
-  const productAssets = assets.filter((asset) => asset.asset_type === "product");
-  const modelAssets = assets.filter((asset) => asset.asset_type === "model");
-  const competitorAssets = assets.filter((asset) => asset.asset_type === "competitor");
-  const confirmedC = outputs.filter((item) => item.output_type === "output_c" && item.status === "confirmed");
-  const hasA = outputs.some((item) => item.output_type === "output_a" && item.status === "confirmed");
-  const hasD = outputs.some((item) => item.output_type === "output_d" && item.status === "confirmed");
-  const [form, setForm] = useState({ title: "", image_goal: "", supplemental_info: "", product_asset_ids: [], model_asset_ids: [], competitor_asset_ids: [], competitor_output_ids: [] });
-  const [activeRun, setActiveRun] = useState(null);
-  const [results, setResults] = useState([]);
-
-  const toggle = (key, id) => {
-    const current = form[key] || [];
-    setForm({ ...form, [key]: current.includes(id) ? current.filter((item) => item !== id) : [...current, id] });
-  };
-  const createRun = async () => {
-    const run = await request("/api/generation-runs", { method: "POST", body: JSON.stringify({ project_id: project.id, ...form }) });
-    setActiveRun(run);
-    await refresh();
-  };
-  const generate = async () => {
-    if (!activeRun) return;
-    await request(`/api/generation-runs/${activeRun.id}/generate`, { method: "POST", body: JSON.stringify({ size: "1024x1024", quality: "high" }) });
-    await loadResults(activeRun.id);
-    await refresh();
-  };
-  const loadResults = async (runId) => {
-    setResults(await request(`/api/generation-runs/${runId}/results`));
-  };
-  const markCandidate = async (result) => {
-    await request(`/api/generation-results/${result.id}/review`, {
-      method: "POST",
-      body: JSON.stringify({ rating: 5, review_notes: "设计部标记为优秀实验", is_knowledge_candidate: true }),
-    });
-    await loadResults(activeRun.id);
-  };
-  const deleteAsset = async (id) => {
-    if (!confirm("确认删除这张图片？")) return;
-    await request(`/api/assets/${id}`, { method: "DELETE" });
-    await refresh();
-  };
-
-  return (
-    <section className="panel">
-      <div className="section-title">
-        <Sparkles size={18} />
-        <h2>单张生图实验</h2>
-      </div>
-      {!hasA || !hasD ? <div className="notice">需要已确认的 OUTPUT-A 和 OUTPUT-D 后才能创建生图实验。</div> : null}
-      <div className="generation-grid">
-        <input placeholder="实验标题" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
-        <textarea placeholder="图片目标，例如主图、面料细节图、支撑卖点图" value={form.image_goal} onChange={(e) => setForm({ ...form, image_goal: e.target.value })} />
-        <textarea placeholder="无法结构化的补充信息" value={form.supplemental_info} onChange={(e) => setForm({ ...form, supplemental_info: e.target.value })} />
-      </div>
-      <AssetPicker title="商品参考图" assets={productAssets} selected={form.product_asset_ids} onToggle={(id) => toggle("product_asset_ids", id)} onDelete={deleteAsset} />
-      <AssetPicker title="模特参考图" assets={modelAssets} selected={form.model_asset_ids} onToggle={(id) => toggle("model_asset_ids", id)} onDelete={deleteAsset} />
-      <AssetPicker title="竞品图留痕" assets={competitorAssets} selected={form.competitor_asset_ids} onToggle={(id) => toggle("competitor_asset_ids", id)} onDelete={deleteAsset} />
-      <div className="check-grid outputs">
-        {confirmedC.map((item) => (
-          <label key={item.id}>
-            <input type="checkbox" checked={form.competitor_output_ids.includes(item.id)} onChange={() => toggle("competitor_output_ids", item.id)} />
-            OUTPUT-C {item.id.slice(0, 8)}
-          </label>
-        ))}
-      </div>
-      <button className="primary" disabled={!hasA || !hasD} onClick={createRun}>
-        <FileImage size={16} />
-        生成提示词实验
-      </button>
-      {activeRun && (
-        <div className="prompt-box">
-          <div className="prompt-head">
-            <strong>{activeRun.title}</strong>
-            <button className="primary" onClick={generate}>
-              <Sparkles size={16} />
-              调用 Image2 生图
-            </button>
-          </div>
-          <pre>{activeRun.prompt}</pre>
-        </div>
-      )}
-      <div className="run-list">
-        {runs.map((run) => (
-          <button
-            key={run.id}
-            onClick={async () => {
-              setActiveRun(run);
-              await loadResults(run.id);
-            }}
-          >
-            <strong>{run.title}</strong>
-            <span>{run.status}</span>
-          </button>
-        ))}
-      </div>
-      <div className="result-grid">
-        {results.map((result) => (
-          <article className="result-card" key={result.id}>
-            {result.url ? <img src={`${API}${result.url}`} alt="generated" /> : <div className="error">{result.error}</div>}
-            <button onClick={() => markCandidate(result)}>
-              <Database size={15} />
-              标记为知识库候选
-            </button>
-          </article>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-function AssetPicker({ title, assets, selected, onToggle, onDelete }) {
-  return (
-    <div className="picker">
-      <h3>{title}</h3>
-      <div className="asset-pick-list">
-        {assets.map((asset) => (
-          <div key={asset.id} className={selected.includes(asset.id) ? "pick-item picked" : "pick-item"}>
-            <button className="pick-main" onClick={() => onToggle(asset.id)}>
-              {asset.url ? (
-                <img src={`${API}${asset.url}`} alt={asset.original_name} />
-              ) : (
-                <div className="asset-missing">文件缺失<br />请删除后重新上传</div>
-              )}
-              <span>{asset.original_name}</span>
-            </button>
-            {onDelete && (
-              <button className="icon-btn danger pick-del" title="删除" onClick={(e) => { e.stopPropagation(); onDelete(asset.id); }}>
-                <Trash2 size={12} />
-              </button>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export default function App() {
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [projectDetail, setProjectDetail] = useState(null);
-  const [schemas, setSchemas] = useState({});
-  const [activeSchemaType, setActiveSchemaType] = useState("output_a");
-  const [knowledge, setKnowledge] = useState([]);
   const [error, setError] = useState("");
 
   const load = async () => {
     try {
       setError("");
-      const [projectList, schemaA, schemaC, schemaD, candidates] = await Promise.all([
-        request("/api/projects"),
-        request("/api/schemas/output_a"),
-        request("/api/schemas/output_c"),
-        request("/api/schemas/output_d"),
-        request("/api/knowledge-candidates"),
-      ]);
+      const projectList = await request("/api/projects");
       setProjects(projectList);
-      setSchemas({ output_a: schemaA, output_c: schemaC, output_d: schemaD });
-      setKnowledge(candidates);
       if (selectedProject) {
         setProjectDetail(await request(`/api/projects/${selectedProject.id}`));
       }
@@ -1075,14 +588,8 @@ export default function App() {
     if (selectedProject?.id === id) setSelectedProject(null);
     await load();
   };
-  const saveSchema = async (type, schema) => {
-    const saved = await request(`/api/schemas/${type}`, { method: "POST", body: JSON.stringify({ name: schema.name, fields: schema.fields }) });
-    setSchemas({ ...schemas, [type]: saved });
-  };
 
   const assets = projectDetail?.assets || [];
-  const outputs = projectDetail?.outputs || [];
-  const runs = projectDetail?.runs || [];
   const docxRuns = projectDetail?.docx_workflow_runs || [];
 
   return (
@@ -1098,20 +605,6 @@ export default function App() {
       <main>
         <aside>
           <ProjectPanel projects={projects} selectedProject={selectedProject} setSelectedProject={setSelectedProject} onCreate={createProject} onDelete={deleteProject} />
-          <section className="panel compact">
-            <div className="section-title">
-              <Database size={18} />
-              <h2>知识库候选</h2>
-            </div>
-            <div className="candidate-list">
-              {knowledge.map((item) => (
-                <div key={item.id}>
-                  <strong>{item.status}</strong>
-                  <span>{item.created_at}</span>
-                </div>
-              ))}
-            </div>
-          </section>
         </aside>
         <div className="workspace">
           {selectedProject && projectDetail ? (

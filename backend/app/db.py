@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from .defaults import DEFAULT_SCHEMAS
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -292,7 +291,6 @@ def init_db() -> None:
             """
         )
         migrate_existing_db(conn)
-        seed_default_schemas(conn)
 
 
 def table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -300,66 +298,6 @@ def table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
 
 
 def migrate_existing_db(conn: sqlite3.Connection) -> None:
-    result_columns = table_columns(conn, "generation_results")
-    if "status" not in result_columns:
-        conn.execute("ALTER TABLE generation_results ADD COLUMN status TEXT NOT NULL DEFAULT 'unknown'")
     step_columns = table_columns(conn, "docx_workflow_steps")
     if "input_refs_json" not in step_columns:
         conn.execute("ALTER TABLE docx_workflow_steps ADD COLUMN input_refs_json TEXT NOT NULL DEFAULT '[]'")
-
-
-def seed_default_schemas(conn: sqlite3.Connection) -> None:
-    for output_type, config in DEFAULT_SCHEMAS.items():
-        exists = conn.execute(
-            "SELECT id FROM schema_definitions WHERE output_type = ?",
-            (output_type,),
-        ).fetchone()
-        if exists:
-            continue
-        ts = now_iso()
-        conn.execute(
-            """
-            INSERT INTO schema_definitions
-            (id, output_type, name, version, status, fields_json, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                new_id(),
-                output_type,
-                config["name"],
-                1,
-                "active",
-                to_json(config["fields"]),
-                ts,
-                ts,
-            ),
-        )
-
-
-def create_schema_snapshot(conn: sqlite3.Connection, output_type: str) -> dict:
-    schema = conn.execute(
-        "SELECT * FROM schema_definitions WHERE output_type = ?",
-        (output_type,),
-    ).fetchone()
-    if not schema:
-        raise ValueError(f"Unknown schema output_type: {output_type}")
-    snapshot_id = new_id()
-    ts = now_iso()
-    conn.execute(
-        """
-        INSERT INTO schema_snapshots
-        (id, schema_definition_id, output_type, name, version, fields_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            snapshot_id,
-            schema["id"],
-            output_type,
-            schema["name"],
-            schema["version"],
-            schema["fields_json"],
-            ts,
-        ),
-    )
-    snapshot = conn.execute("SELECT * FROM schema_snapshots WHERE id = ?", (snapshot_id,)).fetchone()
-    return row_to_dict(snapshot) or {}
