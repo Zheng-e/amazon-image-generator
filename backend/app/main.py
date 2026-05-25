@@ -20,7 +20,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .ai_clients import available_analysis_models, available_image_models, call_image_model
 from .db import (
@@ -35,6 +35,13 @@ from .db import (
     to_json,
 )
 from .docx_workflow import STYLE_OPTIONS, build_workflow_steps, style_options_payload
+from .rag_integration import (
+    RAG_USAGE_TAGS,
+    compact_rag_record,
+    rag_health,
+    rag_image_response,
+    rag_search,
+)
 
 
 app = FastAPI(title="设计部主图生成字段实验台", version="0.1.0")
@@ -89,6 +96,31 @@ class DocxWorkflowGenerateIn(BaseModel):
 class DocxWorkflowStepUpdateIn(BaseModel):
     prompt: str | None = None
     input_refs: list[dict[str, str]] | None = None
+
+
+class RagSearchIn(BaseModel):
+    query: str
+    top_k: int = 8
+    filters: dict[str, Any] = Field(default_factory=dict)
+
+
+class RagReferenceIn(BaseModel):
+    rag_image_id: str
+    filename: str = ""
+    category: str = ""
+    scene: str = ""
+    image_type: str = ""
+    caption: str = ""
+    score: float | None = None
+    usage_tags: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    notes: str = ""
+
+
+class RagReferenceUpdateIn(BaseModel):
+    usage_tags: list[str] | None = None
+    notes: str | None = None
+    sort_order: int | None = None
 
 
 def parse_json_object(text: str) -> dict[str, Any]:
@@ -324,9 +356,93 @@ def insert_docx_workflow_steps(conn, run_id: str, payload: DocxWorkflowRunIn) ->
         )
 
 
+def normalize_usage_tags(tags: list[str]) -> list[str]:
+    clean: list[str] = []
+    for tag in tags:
+        value = str(tag or "").strip()
+        if value in RAG_USAGE_TAGS and value not in clean:
+            clean.append(value)
+    return clean
+
+
+def hydrate_rag_reference(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    row["usage_tags"] = row.pop("usage_tags", row.get("usage_tags_json", []))
+    row["metadata"] = row.pop("metadata", row.get("metadata_json", {}))
+    row["image_url"] = f"/api/rag/images/{row['rag_image_id']}"
+    row["usage_labels"] = [RAG_USAGE_TAGS.get(tag, tag) for tag in row.get("usage_tags") or []]
+    return row
+
+
+def get_rag_references_for_project(conn, project_id: str) -> list[dict]:
+    fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))
+    rows = conn.execute(
+        """
+        SELECT * FROM rag_reference_selections
+        WHERE project_id = ?
+        ORDER BY sort_order ASC, selected_at DESC
+        """,
+        (project_id,),
+    ).fetchall()
+    return [hydrate_rag_reference(row_to_dict(row)) for row in rows]
+
+
+def get_rag_references_by_ids(conn, project_id: str, reference_ids: list[str]) -> list[dict]:
+    if not reference_ids:
+        return []
+    placeholders = ",".join("?" for _ in reference_ids)
+    rows = conn.execute(
+        f"""
+        SELECT * FROM rag_reference_selections
+        WHERE project_id = ? AND id IN ({placeholders})
+        """,
+        (project_id, *reference_ids),
+    ).fetchall()
+    references = [hydrate_rag_reference(row_to_dict(row)) for row in rows]
+    order = {reference_id: index for index, reference_id in enumerate(reference_ids)}
+    return sorted([item for item in references if item], key=lambda item: order.get(item["id"], 9999))
+
+
+def fetch_rag_reference(conn, project_id: str, reference_id: str) -> dict:
+    row = conn.execute(
+        "SELECT * FROM rag_reference_selections WHERE id = ? AND project_id = ?",
+        (reference_id, project_id),
+    ).fetchone()
+    data = hydrate_rag_reference(row_to_dict(row))
+    if not data:
+        raise HTTPException(404, "知识库参考图不存在")
+    return data
+
+
 @app.get("/api/health")
 def health() -> dict:
     return {"ok": True, "time": now_iso()}
+
+
+@app.get("/api/rag/health")
+def api_rag_health() -> dict[str, Any]:
+    return rag_health()
+
+
+@app.post("/api/rag/search")
+def api_rag_search(payload: RagSearchIn) -> dict[str, Any]:
+    query = payload.query.strip()
+    if not query:
+        raise HTTPException(400, "检索词不能为空")
+    return rag_search(
+        {
+            "query": query,
+            "top_k": max(1, min(int(payload.top_k), 20)),
+            "filters": payload.filters if isinstance(payload.filters, dict) else {},
+        }
+    )
+
+
+@app.get("/api/rag/images/{image_id}")
+def api_rag_image(image_id: str) -> Response:
+    content, content_type = rag_image_response(image_id)
+    return Response(content=content, media_type=content_type)
 
 
 @app.get("/api/models/analysis")
@@ -808,6 +924,116 @@ def get_project(project_id: str) -> dict:
         project["assets"] = [hydrate_asset(row_to_dict(row)) for row in assets]
         project["docx_workflow_runs"] = [row_to_dict(row) for row in docx_runs]
         return project
+
+
+@app.get("/api/projects/{project_id}/rag-references")
+def list_project_rag_references(project_id: str) -> list[dict]:
+    with get_db() as conn:
+        return get_rag_references_for_project(conn, project_id)
+
+
+@app.post("/api/projects/{project_id}/rag-references")
+def add_project_rag_reference(project_id: str, payload: RagReferenceIn) -> dict:
+    rag_image_id = payload.rag_image_id.strip()
+    if not rag_image_id:
+        raise HTTPException(400, "rag_image_id 不能为空")
+    usage_tags = normalize_usage_tags(payload.usage_tags)
+    with get_db() as conn:
+        fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))
+        existing = conn.execute(
+            "SELECT * FROM rag_reference_selections WHERE project_id = ? AND rag_image_id = ?",
+            (project_id, rag_image_id),
+        ).fetchone()
+        ts = now_iso()
+        if existing:
+            reference_id = existing["id"]
+            conn.execute(
+                """
+                UPDATE rag_reference_selections
+                SET filename = ?, category = ?, scene = ?, image_type = ?, caption = ?, score = ?,
+                    usage_tags_json = ?, metadata_json = ?, notes = ?
+                WHERE id = ?
+                """,
+                (
+                    payload.filename,
+                    payload.category,
+                    payload.scene,
+                    payload.image_type,
+                    payload.caption,
+                    payload.score,
+                    to_json(usage_tags),
+                    to_json(payload.metadata),
+                    payload.notes,
+                    reference_id,
+                ),
+            )
+        else:
+            reference_id = new_id()
+            max_sort = conn.execute(
+                "SELECT COALESCE(MAX(sort_order), -1) FROM rag_reference_selections WHERE project_id = ?",
+                (project_id,),
+            ).fetchone()[0]
+            conn.execute(
+                """
+                INSERT INTO rag_reference_selections
+                (id, project_id, rag_image_id, filename, category, scene, image_type, caption, score,
+                 usage_tags_json, metadata_json, sort_order, selected_at, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    reference_id,
+                    project_id,
+                    rag_image_id,
+                    payload.filename,
+                    payload.category,
+                    payload.scene,
+                    payload.image_type,
+                    payload.caption,
+                    payload.score,
+                    to_json(usage_tags),
+                    to_json(payload.metadata),
+                    int(max_sort) + 1,
+                    ts,
+                    payload.notes,
+                ),
+            )
+        return fetch_rag_reference(conn, project_id, reference_id)
+
+
+@app.patch("/api/projects/{project_id}/rag-references/{reference_id}")
+def update_project_rag_reference(project_id: str, reference_id: str, payload: RagReferenceUpdateIn) -> dict:
+    assignments: list[str] = []
+    values: list[Any] = []
+    if payload.usage_tags is not None:
+        assignments.append("usage_tags_json = ?")
+        values.append(to_json(normalize_usage_tags(payload.usage_tags)))
+    if payload.notes is not None:
+        assignments.append("notes = ?")
+        values.append(payload.notes)
+    if payload.sort_order is not None:
+        assignments.append("sort_order = ?")
+        values.append(int(payload.sort_order))
+    if not assignments:
+        raise HTTPException(400, "没有可更新字段")
+    with get_db() as conn:
+        fetch_rag_reference(conn, project_id, reference_id)
+        values.extend([reference_id, project_id])
+        conn.execute(
+            f"UPDATE rag_reference_selections SET {', '.join(assignments)} WHERE id = ? AND project_id = ?",
+            tuple(values),
+        )
+        return fetch_rag_reference(conn, project_id, reference_id)
+
+
+@app.delete("/api/projects/{project_id}/rag-references/{reference_id}")
+def delete_project_rag_reference(project_id: str, reference_id: str) -> dict:
+    with get_db() as conn:
+        fetch_rag_reference(conn, project_id, reference_id)
+        conn.execute(
+            "DELETE FROM rag_reference_selections WHERE id = ? AND project_id = ?",
+            (reference_id, project_id),
+        )
+        return {"ok": True}
 
 
 @app.delete("/api/projects/{project_id}")
