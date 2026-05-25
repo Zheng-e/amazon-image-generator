@@ -38,6 +38,8 @@ from .docx_workflow import STYLE_OPTIONS, build_workflow_steps, style_options_pa
 from .rag_integration import (
     RAG_USAGE_TAGS,
     compact_rag_record,
+    download_rag_reference_to_cache,
+    enrich_docx_steps_with_rag,
     rag_health,
     rag_image_response,
     rag_search,
@@ -178,7 +180,7 @@ def normalized_docx_refs(step: dict) -> list[dict[str, str]]:
                 continue
             ref_type = str(item.get("type") or "").strip()
             ref_id = str(item.get("id") or "").strip()
-            if ref_type in {"asset", "step"} and ref_id:
+            if ref_type in {"asset", "step", "rag"} and ref_id:
                 refs.append({"type": ref_type, "id": ref_id})
         if refs:
             return refs
@@ -198,6 +200,10 @@ def split_docx_refs(refs: list[dict[str, str]]) -> tuple[list[str], list[str]]:
         elif ref.get("type") == "step":
             step_ids.append(ref["id"])
     return asset_ids, step_ids
+
+
+def rag_ref_ids(refs: list[dict[str, str]]) -> list[str]:
+    return [ref["id"] for ref in refs if ref.get("type") == "rag"]
 
 
 def fetch_one(conn, query: str, params: tuple = ()) -> dict:
@@ -246,13 +252,18 @@ def fetch_docx_run_package(conn, run_id: str) -> dict:
 
 def attach_docx_reference_items(conn, run: dict, steps: list[dict]) -> list[dict]:
     asset_ids: list[str] = []
+    rag_ids: list[str] = []
     for step in steps:
         for ref in normalized_docx_refs(step):
             if ref["type"] == "asset":
                 asset_ids.append(ref["id"])
+            elif ref["type"] == "rag":
+                rag_ids.append(ref["id"])
     assets = get_assets_by_ids(conn, list(dict.fromkeys(asset_ids)))
     asset_by_id = {asset["id"]: asset for asset in assets}
     step_by_stage = {step["stage_id"]: step for step in steps}
+    rag_references = get_rag_references_by_ids(conn, run["project_id"], list(dict.fromkeys(rag_ids)))
+    rag_by_id = {item["id"]: item for item in rag_references}
     for step in steps:
         items: list[dict[str, Any]] = []
         refs = normalized_docx_refs(step)
@@ -269,6 +280,21 @@ def attach_docx_reference_items(conn, run: dict, steps: list[dict]) -> list[dict
                         "slot": asset.get("slot") if asset else "",
                         "url": asset.get("url") if asset else "",
                         "missing": not asset or not Path(asset.get("file_path") or "").is_file(),
+                    }
+                )
+            elif ref["type"] == "rag":
+                rag_ref = rag_by_id.get(ref["id"])
+                items.append(
+                    {
+                        "type": "rag",
+                        "id": ref["id"],
+                        "order": index,
+                        "label": rag_ref.get("filename") if rag_ref else "知识库参考图已删除",
+                        "rag_image_id": rag_ref.get("rag_image_id") if rag_ref else "",
+                        "usage_tags": rag_ref.get("usage_tags") if rag_ref else [],
+                        "usage_labels": rag_ref.get("usage_labels") if rag_ref else [],
+                        "url": rag_ref.get("image_url") if rag_ref else "",
+                        "missing": not rag_ref,
                     }
                 )
             else:
@@ -328,6 +354,8 @@ def insert_docx_workflow_steps(conn, run_id: str, payload: DocxWorkflowRunIn) ->
         fit_asset_id=payload.fit_asset_id,
         scene_asset_id=payload.scene_asset_id,
     )
+    rag_references = get_rag_references_for_project(conn, payload.project_id)
+    steps = enrich_docx_steps_with_rag(steps, rag_references)
     ts = now_iso()
     for step in steps:
         conn.execute(
@@ -547,7 +575,7 @@ def update_docx_workflow_step(step_id: str, payload: DocxWorkflowStepUpdateIn) -
             for item in payload.input_refs:
                 ref_type = str(item.get("type") or "").strip()
                 ref_id = str(item.get("id") or "").strip()
-                if ref_type not in {"asset", "step"} or not ref_id:
+                if ref_type not in {"asset", "step", "rag"} or not ref_id:
                     raise HTTPException(400, "参考图格式不正确")
                 refs.append({"type": ref_type, "id": ref_id})
             asset_ids, step_ids = split_docx_refs(refs)
@@ -573,6 +601,14 @@ def update_docx_workflow_step(step_id: str, payload: DocxWorkflowStepUpdateIn) -
                 missing_steps = [stage_id for stage_id in step_ids if stage_id not in valid_stage_ids]
                 if missing_steps:
                     raise HTTPException(400, "前置步骤不存在：" + "、".join(missing_steps))
+            selected_rag_ids = rag_ref_ids(refs)
+            if selected_rag_ids:
+                run = fetch_one(conn, "SELECT * FROM docx_workflow_runs WHERE id = ?", (step["run_id"],))
+                rag_refs = get_rag_references_by_ids(conn, run["project_id"], list(dict.fromkeys(selected_rag_ids)))
+                found_rag_refs = {item["id"] for item in rag_refs}
+                missing_rag_refs = [ref_id for ref_id in selected_rag_ids if ref_id not in found_rag_refs]
+                if missing_rag_refs:
+                    raise HTTPException(400, "知识库参考图不存在或不属于当前项目")
             assignments.extend(["input_refs_json = ?", "input_asset_ids_json = ?", "input_step_ids_json = ?"])
             values.extend([to_json(refs), to_json(asset_ids), to_json(step_ids)])
         if payload.prompt is None and payload.input_refs is None:
@@ -635,12 +671,15 @@ def regenerate_docx_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn 
         for ref in refs:
             if ref["type"] == "asset":
                 input_paths.append(Path(asset_by_id[ref["id"]]["file_path"]))
-            else:
+            elif ref["type"] == "step":
                 source_step = step_by_stage.get(ref["id"])
                 source_path = Path(source_step.get("image_path") or "") if source_step else Path("")
                 if not source_step or not source_path.is_file():
                     raise HTTPException(400, f"缺少前置步骤结果，请先生成：{ref['id']}")
                 input_paths.append(source_path)
+            elif ref["type"] == "rag":
+                rag_ref = fetch_rag_reference(conn, run["project_id"], ref["id"])
+                input_paths.append(download_rag_reference_to_cache(run["project_id"], rag_ref, UPLOAD_DIR))
         conn.execute(
             """
             UPDATE docx_workflow_steps
@@ -672,6 +711,7 @@ def regenerate_docx_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn 
             "reference_refs": refs,
             "reference_asset_ids": [ref["id"] for ref in refs if ref["type"] == "asset"],
             "reference_stage_ids": [ref["id"] for ref in refs if ref["type"] == "step"],
+            "reference_rag_ids": [ref["id"] for ref in refs if ref["type"] == "rag"],
             **(image_response.get("params") or {}),
         }
         with get_db() as conn:
@@ -761,7 +801,7 @@ def generate_docx_workflow_run(run_id: str, payload: DocxWorkflowGenerateIn | No
         for ref in refs:
             if ref["type"] == "asset":
                 input_paths.append(Path(asset_by_id[ref["id"]]["file_path"]))
-            else:
+            elif ref["type"] == "step":
                 stage_path = stage_output_paths.get(ref["id"])
                 if not stage_path:
                     missing_dependency = f"缺少前置步骤结果: {ref['id']}"
@@ -772,6 +812,10 @@ def generate_docx_workflow_run(run_id: str, payload: DocxWorkflowGenerateIn | No
                         )
                     return False, step["stage_id"], missing_dependency, None
                 input_paths.append(stage_path)
+            elif ref["type"] == "rag":
+                with get_db() as conn:
+                    rag_ref = fetch_rag_reference(conn, run["project_id"], ref["id"])
+                input_paths.append(download_rag_reference_to_cache(run["project_id"], rag_ref, UPLOAD_DIR))
 
         image_response: dict[str, Any] = {}
         try:
