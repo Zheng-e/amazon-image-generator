@@ -1,22 +1,42 @@
 import {
+  Check,
+  Database,
   FileImage,
   FlaskConical,
   ImagePlus,
   Plus,
   Save,
+  Search,
   Sparkles,
+  Star,
   Trash2,
   Upload,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const API = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+const API = import.meta.env.VITE_API_BASE || window.location.origin;
 
 const ASSET_TYPE_LABELS = {
   product: "商品",
   model: "模特",
   competitor: "竞品",
 };
+
+const RAG_USAGE_TAGS = [
+  ["scene_reference", "场景参考"],
+  ["pose_reference", "姿势参考"],
+  ["composition_reference", "构图参考"],
+  ["color_reference", "色调参考"],
+  ["white_main_reference", "白底主图参考"],
+  ["competitor_fit_reference", "竞品上身参考"],
+];
+
+function defaultRagQuery(project) {
+  return [project?.category, project?.name, project?.sku, "服装 主图 场景 构图 光影"]
+    .filter(Boolean)
+    .join(" ");
+}
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -155,6 +175,193 @@ function AssetPanel({ project, assets, refresh }) {
             </div>
           </div>
         ))}
+      </div>
+    </section>
+  );
+}
+
+function RagKnowledgeWorkbench({ project, refreshProject }) {
+  const [health, setHealth] = useState(null);
+  const [query, setQuery] = useState(defaultRagQuery(project));
+  const [topK, setTopK] = useState(8);
+  const [filterText, setFilterText] = useState("");
+  const [results, setResults] = useState([]);
+  const [references, setReferences] = useState([]);
+  const [selectedTags, setSelectedTags] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadReferences = async () => {
+    if (!project?.id) return;
+    const data = await request(`/api/projects/${project.id}/rag-references`);
+    setReferences(data);
+  };
+
+  useEffect(() => {
+    setQuery(defaultRagQuery(project));
+    setResults([]);
+    setError("");
+    request("/api/rag/health").then(setHealth).catch((err) => setHealth({ status: "unavailable", detail: err.message }));
+    loadReferences().catch((err) => setError(err.message));
+  }, [project?.id]);
+
+  const parseFilters = () => {
+    const text = filterText.trim();
+    if (!text) return {};
+    try {
+      const parsed = JSON.parse(text);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      throw new Error("过滤条件必须是 JSON 对象，例如 {\"compliance\":\"approved\"}");
+    }
+  };
+
+  const search = async () => {
+    if (!query.trim()) return;
+    setBusy(true);
+    setError("");
+    try {
+      const data = await request("/api/rag/search", {
+        method: "POST",
+        body: JSON.stringify({ query, top_k: topK, filters: parseFilters() }),
+      });
+      setResults(data.results || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addReference = async (item) => {
+    const usage_tags = selectedTags[item.image_id] || ["scene_reference"];
+    setBusy(true);
+    setError("");
+    try {
+      await request(`/api/projects/${project.id}/rag-references`, {
+        method: "POST",
+        body: JSON.stringify({
+          rag_image_id: item.image_id,
+          filename: item.filename || "",
+          category: item.category || "",
+          scene: item.scene || "",
+          image_type: item.image_type || "",
+          caption: item.caption || "",
+          score: item.score ?? null,
+          usage_tags,
+          metadata: item.metadata || {},
+          notes: "从知识库工作台加入",
+        }),
+      });
+      await loadReferences();
+      await refreshProject();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const updateReferenceTags = async (reference, tag, checked) => {
+    const current = new Set(reference.usage_tags || []);
+    if (checked) current.add(tag);
+    else current.delete(tag);
+    const usage_tags = [...current];
+    const updated = await request(`/api/projects/${project.id}/rag-references/${reference.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ usage_tags }),
+    });
+    setReferences((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+  };
+
+  const removeReference = async (referenceId) => {
+    if (!confirm("确认从本项目参考池移除这张知识库图片？")) return;
+    await request(`/api/projects/${project.id}/rag-references/${referenceId}`, { method: "DELETE" });
+    await loadReferences();
+  };
+
+  return (
+    <section className="panel rag-workbench">
+      <div className="section-title">
+        <Database size={18} />
+        <h2>知识库工作台</h2>
+      </div>
+      <div className="rag-status">
+        <span className={health?.status === "ok" ? "status-ok" : "status-fail"}>
+          RAG：{health?.status === "ok" ? `可用 · ${health.images || 0} 张图` : "不可用"}
+        </span>
+      </div>
+      <div className="rag-search-grid">
+        <label className="stacked-field">
+          <span>检索词</span>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} />
+        </label>
+        <label className="stacked-field">
+          <span>返回数量</span>
+          <input type="number" min="1" max="20" value={topK} onChange={(event) => setTopK(Number(event.target.value) || 8)} />
+        </label>
+        <label className="stacked-field">
+          <span>过滤 JSON</span>
+          <input placeholder='{"compliance":"approved"}' value={filterText} onChange={(event) => setFilterText(event.target.value)} />
+        </label>
+        <button className="primary" disabled={busy || !query.trim()} onClick={search}>
+          <Search size={16} />
+          搜索知识库
+        </button>
+      </div>
+      {error ? <div className="error-banner">{error}</div> : null}
+      <div className="rag-results-grid">
+        {results.map((item) => (
+          <article key={item.image_id} className="rag-card">
+            <img src={`${API}/api/rag/images/${item.image_id}`} alt={item.filename || item.image_id} />
+            <div className="rag-card-body">
+              <strong>{item.filename || item.image_id}</strong>
+              <span>{item.category || "未分类"} · {item.scene || "未知场景"}</span>
+              <small>{item.image_type || item.caption || ""}</small>
+              <em>相似度：{typeof item.score === "number" ? item.score.toFixed(4) : "-"}</em>
+              <select
+                value={(selectedTags[item.image_id] || ["scene_reference"])[0]}
+                onChange={(event) => setSelectedTags({ ...selectedTags, [item.image_id]: [event.target.value] })}
+              >
+                {RAG_USAGE_TAGS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+              <button disabled={busy} onClick={() => addReference(item)}>
+                <Check size={14} />
+                加入本项目
+              </button>
+            </div>
+          </article>
+        ))}
+      </div>
+      <div className="rag-reference-pool">
+        <div className="prompt-head">
+          <strong>项目参考池</strong>
+          <span>{references.length} 张</span>
+        </div>
+        {references.length ? references.map((reference) => (
+          <article key={reference.id} className="rag-reference-row">
+            <img src={`${API}${reference.image_url}`} alt={reference.filename || reference.rag_image_id} />
+            <div>
+              <strong>{reference.filename || reference.rag_image_id}</strong>
+              <small>{reference.scene || reference.caption || ""}</small>
+              <div className="tag-grid">
+                {RAG_USAGE_TAGS.map(([value, label]) => (
+                  <label key={value}>
+                    <input
+                      type="checkbox"
+                      checked={(reference.usage_tags || []).includes(value)}
+                      onChange={(event) => updateReferenceTags(reference, value, event.target.checked)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <button className="icon-btn danger" title="移除" onClick={() => removeReference(reference.id)}>
+              <X size={14} />
+            </button>
+          </article>
+        )) : <p className="muted">还没有加入本项目的知识库参考图。</p>}
       </div>
     </section>
   );
@@ -610,6 +817,7 @@ export default function App() {
           {selectedProject && projectDetail ? (
             <>
               <AssetPanel project={selectedProject} assets={assets} refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
+              <RagKnowledgeWorkbench project={selectedProject} refreshProject={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
               <DocxWorkflowPanel project={selectedProject} assets={assets} runs={docxRuns} refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
             </>
           ) : (
