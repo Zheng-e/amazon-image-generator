@@ -1,0 +1,187 @@
+{
+  "version": 1,
+  "category": "women_inner_tops",
+  "scene_library": [
+    {
+      "id": "white_main",
+      "name": "Amazon白底主图",
+      "use_for": [
+        1
+      ],
+      "prompt": "pure white RGB 255,255,255 Amazon main image background, no props, no text"
+    },
+    {
+      "id": "sunlit_bedroom",
+      "name": "阳光卧室",
+      "use_for": [
+        4,
+        5,
+        7,
+        8
+      ],
+      "prompt": "sunlit modern bedroom with neutral bedding, soft window light, tidy premium home atmosphere"
+    },
+    {
+      "id": "walk_in_closet",
+      "name": "衣帽间/穿衣镜",
+      "use_for": [
+        3,
+        4,
+        5,
+        8
+      ],
+      "prompt": "realistic walk-in closet or dressing mirror corner with shelves, hangers, soft neutral decor"
+    },
+    {
+      "id": "street_cafe",
+      "name": "街景/咖啡店外",
+      "use_for": [
+        7
+      ],
+      "prompt": "clean casual street scene near a cafe exterior, storefront, pavement, daylight lifestyle mood"
+    },
+    {
+      "id": "home_fabric_table",
+      "name": "家中面料护理台",
+      "use_for": [
+        2,
+        5,
+        6
+      ],
+      "prompt": "wooden dresser or linen laundry table beside a daylight window, real fabric-care home setting"
+    },
+    {
+      "id": "athleisure_errands",
+      "name": "运动休闲通勤",
+      "use_for": [
+        7
+      ],
+      "prompt": "yoga-to-errands athleisure environment, apartment doorway or quiet sidewalk, realistic daylight"
+    }
+  ],
+  "selling_point_library": [
+    {
+      "id": "main_fit",
+      "name": "主图版型",
+      "use_for": [
+        1
+      ]
+    },
+    {
+      "id": "double_lined",
+      "name": "双层面料",
+      "use_for": [
+        2,
+        3
+      ]
+    },
+    {
+      "id": "opacity",
+      "name": "防透",
+      "use_for": [
+        5,
+        6
+      ]
+    },
+    {
+      "id": "adjustable_straps",
+      "name": "可调节肩带",
+      "use_for": [
+        3,
+        4
+      ]
+    },
+    {
+      "id": "support_coverage",
+      "name": "支撑包覆",
+      "use_for": [
+        3
+      ]
+    },
+    {
+      "id": "slim_silhouette",
+      "name": "修身版型/衣长",
+      "use_for": [
+        4,
+        5
+      ]
+    },
+    {
+      "id": "layering",
+      "name": "叠穿",
+      "use_for": [
+        7
+      ]
+    },
+    {
+      "id": "size_reference",
+      "name": "尺码参考",
+      "use_for": [
+        8
+      ]
+    }
+  ],
+  "pose_library": [
+    {
+      "id": "main_crop",
+      "name": "主图紧裁切",
+      "use_for": [
+        1
+      ],
+      "prompt": "shoulder-to-hip crop, product fills canvas"
+    },
+    {
+      "id": "front_back",
+      "name": "正背面对比",
+      "use_for": [
+        4
+      ],
+      "prompt": "front and back views with relaxed movement"
+    },
+    {
+      "id": "adjusting_strap",
+      "name": "整理肩带",
+      "use_for": [
+        3,
+        7
+      ],
+      "prompt": "naturally adjusting one shoulder strap"
+    },
+    {
+      "id": "walking_step",
+      "name": "轻微走动",
+      "use_for": [
+        7
+      ],
+      "prompt": "gentle walking step, natural casual movement"
+    },
+    {
+      "id": "layer_open_shirt",
+      "name": "开衬衫叠穿",
+      "use_for": [
+        7
+      ],
+      "prompt": "wearing an open shirt layered over the camisole"
+    },
+    {
+      "id": "mirror_turn",
+      "name": "试衣镜转身",
+      "use_for": [
+        4,
+        5,
+        8
+      ],
+      "prompt": "slight turn near mirror showing side or hem"
+    },
+    {
+      "id": "product_macro",
+      "name": "商品细节特写",
+      "use_for": [
+        2,
+        5,
+        6
+      ],
+      "prompt": "product-only macro detail, no human body"
+    }
+  ]
+}

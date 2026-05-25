@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.egg-info/
+dist/
+build/
+
+# Vendored dependencies (install via pip install -r requirements.txt instead)
+.deps/
+.webdeps/
+
+# Generated output (images, database)
+output/
+
+# Raw materials / source images
+原始素材/
+
+# API keys / secrets
+api key.txt
+api.txt
+.env
+
+# Standalone CLI script (not part of docx workflow)
+generate.py
+
+# Office / docx files (not needed for running)
+*.docx
+~$*.docx
+
+# IDE / editor
+.vscode/
+.idea/
+
+# Claude Code local settings (may contain keys)
+.claude/settings.local.json
+
+# Node
+node_modules/
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

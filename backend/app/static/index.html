@@ -1,0 +1,1410 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>主图生成工作台</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: "Microsoft YaHei", system-ui, sans-serif; background: #eef2f4; color: #202124; }
+      header { padding: 18px 26px; background: #fff; border-bottom: 1px solid #d7e0e5; display: flex; justify-content: space-between; gap: 18px; align-items: center; }
+      h1 { margin: 0; font-size: 22px; }
+      h2 { margin: 0 0 12px; font-size: 16px; }
+      h3 { margin: 14px 0 8px; font-size: 13px; color: #4e5a61; }
+      p { margin: 6px 0 0; color: #65717a; font-size: 13px; line-height: 1.55; }
+      main { display: grid; grid-template-columns: 330px 1fr; gap: 16px; padding: 16px; }
+      section { background: #fff; border: 1px solid #d7e0e5; border-radius: 8px; padding: 14px; margin-bottom: 16px; }
+      input, textarea, select, button { font: inherit; }
+      input, textarea, select { width: 100%; border: 1px solid #c9d3d8; border-radius: 6px; padding: 8px; background: #fff; }
+      textarea { min-height: 86px; resize: vertical; }
+      button { border: 1px solid #c9d3d8; border-radius: 6px; padding: 8px 10px; background: #fff; cursor: pointer; }
+      button.primary { background: #315f59; border-color: #315f59; color: #fff; }
+      button.danger { color: #8f3428; border-color: #e2aa96; }
+      .icon-btn { display: inline-flex; align-items: center; justify-content: center; border: none; background: transparent; cursor: pointer; padding: 4px; border-radius: 4px; color: #8a8580; width: auto; }
+      .icon-btn:hover { background: #f0ecea; }
+      .icon-btn.danger:hover { background: #fde8e4; color: #c0392b; }
+      .project-row { display: flex; align-items: stretch; gap: 4px; margin-bottom: 8px; }
+      .project-row button:first-child { flex: 1; min-width: 0; }
+      figure { position: relative; }
+      .fig-del { position: absolute; top: 4px; right: 4px; background: rgba(255,255,255,0.85); border-radius: 4px; opacity: 0; transition: opacity 0.15s; width: auto; padding: 3px; }
+      figure:hover .fig-del { opacity: 1; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      body.busy button { opacity: 0.55; pointer-events: none; }
+      .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      .stack { display: flex; flex-direction: column; gap: 8px; }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+      .pill { padding: 8px 12px; border-radius: 999px; background: #e7f2ef; color: #315f59; white-space: nowrap; }
+      .error { margin: 0 16px; padding: 10px; background: #f9e7df; border: 1px solid #e2aa96; color: #70311f; border-radius: 6px; display: none; white-space: pre-wrap; }
+      .busy-banner { position: sticky; top: 0; z-index: 20; display: none; align-items: center; gap: 10px; margin: 0 16px; padding: 10px 12px; background: #fff7db; border: 1px solid #dcc073; color: #5e4911; border-radius: 0 0 8px 8px; box-shadow: 0 4px 12px rgba(52, 64, 70, 0.08); }
+      .spinner { width: 16px; height: 16px; border: 2px solid #dcc073; border-top-color: #315f59; border-radius: 50%; animation: spin 0.8s linear infinite; flex: 0 0 auto; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .projects { max-height: 420px; overflow: auto; padding-right: 4px; }
+      .projects > button { width: 100%; text-align: left; margin-bottom: 8px; }
+      .active, .card.active, .module-tab.active { background: #e7f2ef; border-color: #315f59; }
+      .module-tabs { display: flex; gap: 10px; margin-bottom: 16px; }
+      .module-tab { flex: 1; font-weight: 700; }
+      .module { display: none; }
+      .module.active { display: block; }
+      .docx-config { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+      .docx-assets { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+      .docx-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+      .docx-step-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+      .docx-step-card { padding: 0; overflow: hidden; }
+      .docx-step-card.success { border-color: #8ab8a9; }
+      .docx-step-card.failed { border-color: #e2aa96; }
+      .docx-step-card .step-head { display: grid; grid-template-columns: 38px 1fr auto; gap: 8px; align-items: center; padding: 8px; background: #f5f8f9; }
+      .docx-step-card .step-head span { font-weight: 800; color: #315f59; }
+      .docx-step-card .step-head small { white-space: nowrap; }
+      .docx-step-card .prompt { margin: 0; border-width: 1px 0 0; border-radius: 0; min-height: 360px; max-height: 60vh; line-height: 1.65; resize: vertical; }
+      .docx-ref-panel { padding: 10px; border-top: 1px solid #d7e0e5; background: #fbfcfd; }
+      .docx-ref-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; color: #4e5a61; }
+      .docx-ref-list { display: flex; flex-direction: column; gap: 8px; }
+      .docx-ref-item { display: grid; grid-template-columns: 34px 72px minmax(0, 1fr); gap: 8px; align-items: start; padding: 8px; border: 1px solid #d7e0e5; border-radius: 6px; background: #fff; }
+      .docx-ref-item.dragging { opacity: 0.5; }
+      .docx-ref-order { width: 28px; height: 28px; border-radius: 50%; background: #e7f2ef; color: #315f59; display: flex; align-items: center; justify-content: center; font-weight: 800; cursor: grab; }
+      .docx-ref-thumb { width: 72px; height: 72px; border: 1px solid #d7e0e5; border-radius: 4px; overflow: hidden; background: #f5f8f9; display: flex; align-items: center; justify-content: center; color: #65717a; font-size: 11px; text-align: center; }
+      .docx-ref-thumb img { width: 100%; height: 100%; aspect-ratio: auto; object-fit: cover; }
+      .docx-ref-body { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+      .docx-ref-body b { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .docx-ref-body select, .docx-ref-body input[type="file"] { padding: 5px; font-size: 12px; }
+      .docx-ref-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+      .docx-ref-actions button { padding: 5px 7px; font-size: 12px; }
+      .docx-ref-add { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 8px; }
+      .step-placeholder { min-height: 150px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; color: #65717a; background: #fbfcfd; }
+      .asset-missing { min-height: 150px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; color: #8f3428; background: #fff6f2; font-size: 12px; }
+      .asset-grid, .result-grid, .records { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+      .result-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+      figure, .card { margin: 0; border: 1px solid #d7e0e5; border-radius: 6px; overflow: hidden; background: #fff; }
+      .card { padding: 10px; }
+      img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: #f5f8f9; }
+      .result-grid img { object-fit: contain; cursor: zoom-in; }
+      figcaption { padding: 6px; font-size: 11px; color: #65717a; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .muted, small { color: #65717a; font-size: 12px; }
+      .prompt, .json-editor { white-space: pre-wrap; max-height: 320px; overflow: auto; background: #f5f8f9; border: 1px solid #d7e0e5; padding: 12px; border-radius: 6px; font-size: 12px; font-family: Consolas, monospace; }
+      .json-editor { width: 100%; min-height: 260px; }
+      .doc-card { cursor: pointer; }
+      .doc-card b { display: block; margin-bottom: 4px; }
+      .group { border: 1px solid #d7e0e5; border-radius: 8px; padding: 10px; margin-bottom: 12px; background: #fbfcfd; }
+      .group-head { display: grid; grid-template-columns: 1fr 1fr auto; gap: 8px; align-items: center; margin-bottom: 8px; }
+      .field-row { display: grid; grid-template-columns: 0.8fr 1fr 120px 1.4fr 1.2fr auto; gap: 8px; align-items: start; margin-bottom: 8px; }
+      .field-row textarea { min-height: 44px; }
+      .status-fail { color: #8f3428; font-weight: 700; }
+      .image-modal { position: fixed; inset: 0; z-index: 100; display: none; align-items: center; justify-content: center; padding: 24px; background: rgba(20, 27, 31, 0.86); }
+      .image-modal-content { width: min(96vw, 1380px); max-height: 96vh; display: flex; flex-direction: column; gap: 10px; }
+      .image-modal-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; color: #fff; }
+      .image-modal-toolbar button { background: #fff; color: #202124; pointer-events: auto; }
+      .image-modal img { width: 100%; max-height: 88vh; aspect-ratio: auto; object-fit: contain; background: #eef2f4; border-radius: 8px; }
+      @media (max-width: 1050px) {
+        main { grid-template-columns: 1fr; }
+        .grid, .field-row, .group-head, .docx-config, .docx-assets { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>主图生成工作台</h1>
+        <p>上传四张参考图，按 DOCX 文档固定流程自动生成 9 张商品图。</p>
+      </div>
+      <div class="pill" id="currentProject">未选择项目</div>
+    </header>
+    <div class="error" id="errorBox"></div>
+    <div class="busy-banner" id="busyBox"><span class="spinner"></span><span id="busyText">请求处理中，请稍候...</span></div>
+
+    <main>
+      <aside>
+        <section>
+          <h2>项目</h2>
+          <div class="stack">
+            <input id="sku" placeholder="SKU，必填，例如 FS03767" />
+            <input id="category" placeholder="品类，可选，例如 women tank top" />
+            <input id="projectName" placeholder="项目名称，可选" />
+            <textarea id="projectNotes" placeholder="备注，可选"></textarea>
+            <button class="primary" onclick="createProject()">创建项目</button>
+          </div>
+          <h3>按 SKU 搜索</h3>
+          <div class="row">
+            <input id="projectSearch" placeholder="输入 SKU 搜索" onkeydown="if(event.key==='Enter') searchProjects()" />
+            <button onclick="searchProjects()">搜索</button>
+          </div>
+          <h3>项目列表</h3>
+          <div class="projects" id="projects"></div>
+          <div class="row" style="margin-top: 10px">
+            <button onclick="pageProjects(-1)">上一页</button>
+            <span class="muted" id="projectPageInfo">第 1 页</span>
+            <button onclick="pageProjects(1)">下一页</button>
+          </div>
+        </section>
+      </aside>
+
+      <div>
+        <section>
+          <div class="module-tabs">
+            <button class="module-tab" id="tab_analysis" style="display:none" onclick="switchModule('analysis')">模块一：竞品 JSON 分析</button>
+            <button class="module-tab" id="tab_generation" style="display:none" onclick="switchModule('generation')">模块二：商品参考图生图</button>
+            <button class="module-tab active" id="tab_docx" onclick="switchModule('docx')">DOCX 固定九图流程</button>
+          </div>
+          <p id="moduleHint">先在模块一上传竞品图，生成并确认 JSON；再到模块二导入商品参考图和 JSON 进行生图。</p>
+        </section>
+
+        <div class="module" id="module_analysis" style="display:none">
+          <section>
+            <h2>竞品图上传</h2>
+            <div class="row">
+              <input id="assetFiles" type="file" multiple accept="image/*" />
+              <button class="primary" onclick="uploadCompetitors()">上传竞品图</button>
+            </div>
+            <h3>当前竞品图</h3>
+            <div id="assets" class="asset-grid"></div>
+          </section>
+
+          <section>
+            <h2>AI 自动生成分析 JSON</h2>
+            <p>不需要提前设置字段。AI 会为每张竞品图自动决定字段和值，并汇总出总品类视觉规范。</p>
+            <label class="stack">
+              <span class="muted">图片分析模型</span>
+              <select id="analysisModelSelect"></select>
+            </label>
+            <div class="row" style="margin-top: 10px">
+              <button class="primary" onclick="runDynamicAnalysis()">AI 自动生成 JSON + 提示词</button>
+              <button onclick="exportPackage()">导出 JSON 包</button>
+            </div>
+          </section>
+
+          <section>
+            <h2>AI JSON 文档</h2>
+            <div id="documentList" class="records"></div>
+          </section>
+
+          <section>
+            <h2>人工编辑 JSON</h2>
+            <p>点击上方任意 JSON 文档后，在这里修改字段和值。保存并确认后即可导出或进入生图模块使用。</p>
+            <div id="editorEmpty" class="muted">请选择一个 JSON 文档。</div>
+            <div id="editorPanel" style="display:none">
+              <div class="row">
+                <button class="primary" onclick="saveEditingDocument('confirmed')">保存并确认</button>
+                <button onclick="saveEditingDocument('draft')">保存草稿</button>
+                <button onclick="addGroup()">新增分组</button>
+                <button onclick="toggleAdvancedJson()">高级 JSON</button>
+              </div>
+              <div id="groupEditor" style="margin-top:12px"></div>
+              <textarea id="advancedJson" class="json-editor" style="display:none; margin-top:12px"></textarea>
+            </div>
+          </section>
+        </div>
+
+        <div class="module" id="module_generation" style="display:none">
+          <section>
+            <h2>商品/模特参考图上传</h2>
+            <div class="grid">
+              <select id="refAssetType">
+                <option value="product">商品参考图</option>
+                <option value="model">模特参考图</option>
+                <option value="competitor">竞品/风格参考图</option>
+              </select>
+              <input id="refFiles" type="file" multiple accept="image/*" />
+              <select id="refSlot">
+                <option value="">素材用途（可选）</option>
+                <option value="product_image">产品图</option>
+                <option value="model_reference">模特面部及身材参考图</option>
+                <option value="fit_reference">衣服上身效果参考图</option>
+                <option value="scene_style_reference">场景风格参考图</option>
+              </select>
+              <textarea id="refNotes" placeholder="参考图说明，可选"></textarea>
+              <button class="primary" onclick="uploadReferences()">上传参考图</button>
+            </div>
+            <h3>商品参考图</h3>
+            <div id="productAssets" class="asset-grid"></div>
+            <h3>模特参考图</h3>
+            <div id="modelAssets" class="asset-grid"></div>
+          </section>
+
+          <section>
+            <h2>导入前一步 JSON</h2>
+            <p>可以使用当前项目在模块一生成的 JSON，也可以导入历史导出的 JSON 包，跳过竞品图分析直接生图。</p>
+            <div class="row">
+              <button onclick="importPackage()">导入 JSON 包</button>
+              <button onclick="exportPackage()">导出当前 JSON 包</button>
+              <input id="importFile" type="file" accept="application/json,.json" style="display:none" onchange="handleImportFile()" />
+            </div>
+            <h3>可用于生图的 JSON</h3>
+            <div id="generationDocumentList" class="records"></div>
+          </section>
+
+          <section>
+            <h2>生图设置</h2>
+            <div class="grid">
+              <label class="stack">
+                <span class="muted">生图模型</span>
+                <select id="imageModelSelect" onchange="renderImageModelHint()"></select>
+              </label>
+              <textarea id="supplemental" placeholder="补充信息：例如希望突出什么风格、避免什么画面、是否偏主图白底、是否偏生活方式图。"></textarea>
+            </div>
+            <p id="imageModelHint"></p>
+            <div class="row" style="margin-top: 10px">
+              <button class="primary" onclick="generateFromDocuments()">一键生成整套图片</button>
+            </div>
+            <h3>提示词预览</h3>
+            <div id="promptPreview" class="records"></div>
+            <h3>生成结果</h3>
+            <div id="results" class="result-grid"></div>
+          </section>
+        </div>
+
+        <div class="module active" id="module_docx">
+          <section>
+            <h2>DOCX 固定九图流程</h2>
+            <h3>上传本流程所需四张图片</h3>
+            <div class="docx-assets">
+              <label class="stack">
+                <span class="muted">产品图</span>
+                <input id="docxProductFile" type="file" accept="image/*" />
+              </label>
+              <label class="stack">
+                <span class="muted">模特面部及身材参考图</span>
+                <input id="docxModelFile" type="file" accept="image/*" />
+              </label>
+              <label class="stack">
+                <span class="muted">衣服上身效果参考图</span>
+                <input id="docxFitFile" type="file" accept="image/*" />
+              </label>
+              <label class="stack">
+                <span class="muted">场景风格参考图</span>
+                <input id="docxSceneFile" type="file" accept="image/*" />
+              </label>
+            </div>
+            <div class="docx-actions">
+              <button class="primary" onclick="uploadDocxRequiredAssets()">上传并自动填入四张参考图</button>
+            </div>
+
+            <h3>产品信息与参考图确认</h3>
+            <div class="docx-config">
+              <label class="stack">
+                <span class="muted">产品名称</span>
+                <input id="docxProductName" placeholder="例如：白色双层可调节吊带背心" />
+              </label>
+              <label class="stack">
+                <span class="muted">材质</span>
+                <input id="docxMaterial" placeholder="例如：Smooth Spandex fabric，Plain weave" />
+              </label>
+              <label class="stack">
+                <span class="muted">输出规格风格</span>
+                <select id="docxStyleSelect"></select>
+              </label>
+              <label class="stack">
+                <span class="muted">生图模型</span>
+                <select id="docxImageModelSelect" onchange="renderImageModelHint()"></select>
+              </label>
+              <label class="stack">
+                <span class="muted">图片尺寸</span>
+                <select id="docxSizeSelect">
+                  <option value="2048x2048">2048x2048</option>
+                  <option value="2048x1152">2048x1152</option>
+                  <option value="1152x2048">1152x2048</option>
+                  <option value="1024x1024" selected>1024x1024</option>
+                  <option value="1024x1536">1024x1536</option>
+                  <option value="1536x1024">1536x1024</option>
+                  <option value="3072x1024">3072x1024</option>
+                </select>
+              </label>
+              <label class="stack">
+                <span class="muted">图片质量</span>
+                <select id="docxQualitySelect">
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high" selected>high</option>
+                </select>
+              </label>
+            </div>
+            <p id="docxImageModelHint"></p>
+            <div class="docx-assets">
+              <label class="stack">
+                <span class="muted">产品图</span>
+                <select id="docxProductAsset"></select>
+              </label>
+              <label class="stack">
+                <span class="muted">模特面部及身材参考图</span>
+                <select id="docxModelAsset"></select>
+              </label>
+              <label class="stack">
+                <span class="muted">衣服上身效果参考图</span>
+                <select id="docxFitAsset"></select>
+              </label>
+              <label class="stack">
+                <span class="muted">场景风格参考图</span>
+                <select id="docxSceneAsset"></select>
+              </label>
+            </div>
+            <div class="docx-actions">
+              <button class="primary" onclick="previewDocxWorkflow()">预览 9 张提示词</button>
+              <button class="primary" onclick="generateDocxWorkflow()">一键生成 9 张图</button>
+              <button id="docxDownloadButton" onclick="downloadDocxRun()" disabled>一键下载 9 张图</button>
+            </div>
+          </section>
+
+          <section>
+            <h2>生成任务记录</h2>
+            <div id="docxRunList" class="records"></div>
+          </section>
+
+          <section>
+            <h2>提示词与结果</h2>
+            <div id="docxResults" class="docx-step-grid"></div>
+          </section>
+        </div>
+      </div>
+    </main>
+
+    <div class="image-modal" id="imageModal" onclick="closeImageModal()">
+      <div class="image-modal-content" onclick="event.stopPropagation()">
+        <div class="image-modal-toolbar">
+          <span id="modalCaption">生成结果预览</span>
+          <button onclick="closeImageModal()">关闭</button>
+        </div>
+        <img id="modalImage" alt="生成结果放大预览" />
+      </div>
+    </div>
+
+    <script>
+      const API = location.origin;
+      const FIELD_TYPES = ["text", "textarea", "number", "boolean", "list", "single_select", "multi_select"];
+      const PROJECT_PAGE_SIZE = 12;
+      let state = {
+        projects: [],
+        project: null,
+        detail: null,
+        analysisModels: [],
+        imageModels: [],
+        docxStyles: [],
+        documents: [],
+        editingDocument: null,
+        workflowPreview: null,
+        docxActiveRun: null,
+        activeModule: "docx",
+        projectOffset: 0,
+        projectSearch: "",
+      };
+      let docxDraggingRef = null;
+
+      async function api(path, options = {}) {
+        const res = await fetch(API + path, {
+          headers: options.body instanceof FormData ? undefined : { "Content-Type": "application/json" },
+          ...options,
+        });
+        if (!res.ok) throw new Error(await res.text());
+        return res.json();
+      }
+
+      function setBusy(message) {
+        busyText.textContent = message || "请求处理中，请稍候...";
+        busyBox.style.display = "flex";
+        document.body.classList.add("busy");
+      }
+
+      function clearBusy() {
+        busyBox.style.display = "none";
+        document.body.classList.remove("busy");
+      }
+
+      async function safe(fn, message) {
+        try {
+          errorBox.style.display = "none";
+          setBusy(message);
+          await fn();
+        } catch (err) {
+          errorBox.textContent = err.message || err;
+          errorBox.style.display = "block";
+        } finally {
+          clearBusy();
+        }
+      }
+
+      async function boot() {
+        await safe(async () => {
+          const query = new URLSearchParams({
+            sku: state.projectSearch,
+            limit: String(PROJECT_PAGE_SIZE),
+            offset: String(state.projectOffset),
+          });
+          const [projects, analysisModels, imageModels, docxStyles] = await Promise.all([
+            api(`/api/projects?${query.toString()}`),
+            api("/api/models/analysis"),
+            api("/api/models/image"),
+            api("/api/docx-workflow/styles"),
+          ]);
+          state.projects = projects;
+          state.analysisModels = analysisModels;
+          state.imageModels = imageModels;
+          state.docxStyles = docxStyles;
+          if (state.project) state.detail = await api(`/api/projects/${state.project.id}`);
+          render();
+        }, "正在加载工作台...");
+      }
+
+      async function refreshDetail() {
+        if (!state.project) return;
+        state.detail = await api(`/api/projects/${state.project.id}`);
+        state.documents = state.detail.analysis_documents || [];
+        render();
+      }
+
+      function competitorAssets() {
+        return (state.detail?.assets || []).filter((asset) => asset.asset_type === "competitor");
+      }
+
+      function productAssetsList() {
+        return (state.detail?.assets || []).filter((asset) => asset.asset_type === "product");
+      }
+
+      function modelAssetsList() {
+        return (state.detail?.assets || []).filter((asset) => asset.asset_type === "model");
+      }
+
+      function allCompetitorAssetIds() {
+        return competitorAssets().map((asset) => asset.id);
+      }
+
+      function allReferenceAssetIds(type) {
+        return (state.detail?.assets || []).filter((asset) => asset.asset_type === type).map((asset) => asset.id);
+      }
+
+      function selectedAnalysisModel() {
+        return analysisModelSelect.value || state.analysisModels[0]?.model || "";
+      }
+
+      function selectedImageModel() {
+        const docxSelect = document.getElementById("docxImageModelSelect");
+        const legacySelect = document.getElementById("imageModelSelect");
+        const activeSelect = state.activeModule === "docx" && docxSelect ? docxSelect : legacySelect;
+        return activeSelect?.value || state.imageModels[0]?.model || "gpt-image-2-client";
+      }
+
+      function selectedDocxSize() {
+        const select = document.getElementById("docxSizeSelect");
+        return select?.value || "1024x1024";
+      }
+
+      function selectedDocxQuality() {
+        const select = document.getElementById("docxQualitySelect");
+        return select?.value || "high";
+      }
+
+      function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+
+      function docxRunReadyToDownload(run) {
+        const steps = run?.steps || [];
+        return steps.length === 9 && steps.every((step) => step.status === "success" && step.url);
+      }
+
+      function render() {
+        renderProjects();
+        currentProject.textContent = state.project ? state.project.sku : "未选择项目";
+        renderModules();
+        renderModels();
+        renderAssets();
+        renderDocuments();
+        renderEditor();
+        renderPromptPreview();
+        renderDocxWorkflow();
+      }
+
+      function renderProjects() {
+        projects.innerHTML = state.projects.map((p) => (
+          `<div class="project-row"><button class="${state.project?.id === p.id ? "active" : ""}" onclick="selectProject('${p.id}')"><b>${escapeHtml(p.sku)}</b><br>${escapeHtml(p.name || p.sku)}</button><button class="icon-btn danger" title="删除项目" onclick="event.stopPropagation();deleteProject('${p.id}')">✕</button></div>`
+        )).join("") || `<div class="muted">没有找到项目</div>`;
+        const page = Math.floor(state.projectOffset / PROJECT_PAGE_SIZE) + 1;
+        projectPageInfo.textContent = `第 ${page} 页`;
+      }
+
+      function renderModules() {
+        tab_analysis.classList.toggle("active", state.activeModule === "analysis");
+        tab_generation.classList.toggle("active", state.activeModule === "generation");
+        tab_docx.classList.toggle("active", state.activeModule === "docx");
+        module_analysis.classList.toggle("active", state.activeModule === "analysis");
+        module_generation.classList.toggle("active", state.activeModule === "generation");
+        module_docx.classList.toggle("active", state.activeModule === "docx");
+        module_analysis.style.display = state.activeModule === "analysis" ? "block" : "none";
+        module_generation.style.display = state.activeModule === "generation" ? "block" : "none";
+        module_docx.style.display = state.activeModule === "docx" ? "block" : "none";
+        moduleHint.textContent = state.activeModule === "analysis"
+          ? "当前模块只负责导入竞品图并分析出可编辑、可导出的 JSON。"
+          : state.activeModule === "generation"
+            ? "当前模块只负责导入商品/模特参考图和 JSON，然后选择生图模型生成图片。"
+            : "当前模块严格按 DOCX 固定提示词生成九张图，不做提示词改写。";
+      }
+
+      function switchModule(moduleName) {
+        state.activeModule = moduleName;
+        renderModules();
+      }
+
+      function renderModels() {
+        const currentAnalysisModel = analysisModelSelect.value;
+        analysisModelSelect.innerHTML = state.analysisModels.length
+          ? state.analysisModels.map((item) => `<option value="${escapeAttr(item.model)}">${escapeHtml(item.model)} (${item.key_count} keys)</option>`).join("")
+          : `<option value="">没有可用分析模型</option>`;
+        if (currentAnalysisModel) analysisModelSelect.value = currentAnalysisModel;
+        const currentImageModel = imageModelSelect.value;
+        const currentDocxImageModel = docxImageModelSelect.value;
+        const imageModelOptions = state.imageModels.length
+          ? state.imageModels.map((item) => `<option value="${escapeAttr(item.model)}">${escapeHtml(item.model)} (${item.key_count} keys · ${escapeHtml(item.api_type)})</option>`).join("")
+          : `<option value="gpt-image-2-client">gpt-image-2-client</option>`;
+        imageModelSelect.innerHTML = imageModelOptions;
+        docxImageModelSelect.innerHTML = imageModelOptions;
+        if (currentImageModel) imageModelSelect.value = currentImageModel;
+        if (currentDocxImageModel) {
+          docxImageModelSelect.value = currentDocxImageModel;
+        } else if ([...docxImageModelSelect.options].some((option) => option.value === "gpt-image-2-client")) {
+          docxImageModelSelect.value = "gpt-image-2-client";
+        }
+        renderImageModelHint();
+      }
+
+      function renderImageModelHint() {
+        const model = selectedImageModel();
+        const selected = state.imageModels.find((item) => item.model === model);
+        const text = model.includes("gemini")
+          ? "Gemini Flash Image：走 chat/completions，偏快速生成和风格对比，可接收商品/模特参考图。"
+          : "GPT Image：走 images/edits，偏参考图编辑和保真。";
+        const suffix = selected ? ` 当前模型配置 ${selected.key_count} 个 key，请求会按模型独立轮换 key。` : "";
+        imageModelHint.textContent = text + suffix;
+        if (document.getElementById("docxImageModelHint")) docxImageModelHint.textContent = text + suffix;
+      }
+
+      async function createProject() {
+        await safe(async () => {
+          const value = sku.value.trim();
+          if (!value) throw new Error("SKU 为必填项");
+          state.project = await api("/api/projects", { method: "POST", body: JSON.stringify({
+            sku: value,
+            category: category.value || "",
+            name: projectName.value || "",
+            notes: projectNotes.value || "",
+          })});
+          state.projectOffset = 0;
+          state.projectSearch = value;
+          projectSearch.value = value;
+          await boot();
+          await refreshDetail();
+        }, "正在创建项目...");
+      }
+
+      async function selectProject(id) {
+        await safe(async () => {
+          state.project = state.projects.find((p) => p.id === id);
+          state.editingDocument = null;
+          state.workflowPreview = null;
+          state.docxActiveRun = null;
+          await refreshDetail();
+        }, "正在切换项目...");
+      }
+
+      async function deleteProject(id) {
+        if (!confirm("确认删除该项目？所有相关素材和记录都会被删除。")) return;
+        await safe(async () => {
+          await api(`/api/projects/${id}`, { method: "DELETE" });
+          if (state.project?.id === id) {
+            state.project = null;
+            state.detail = null;
+            state.editingDocument = null;
+            state.workflowPreview = null;
+            state.docxActiveRun = null;
+          }
+          await boot();
+        }, "正在删除项目...");
+      }
+
+      async function deleteAsset(id) {
+        if (!confirm("确认删除这张图片？")) return;
+        await safe(async () => {
+          await api(`/api/assets/${id}`, { method: "DELETE" });
+          await refreshDetail();
+        }, "正在删除图片...");
+      }
+
+      async function searchProjects() {
+        state.projectSearch = projectSearch.value.trim();
+        state.projectOffset = 0;
+        await boot();
+      }
+
+      async function pageProjects(direction) {
+        const next = state.projectOffset + direction * PROJECT_PAGE_SIZE;
+        if (next < 0) return;
+        state.projectOffset = next;
+        await boot();
+        if (!state.projects.length && state.projectOffset > 0) {
+          state.projectOffset = Math.max(0, state.projectOffset - PROJECT_PAGE_SIZE);
+          await boot();
+        }
+      }
+
+      async function uploadCompetitors() {
+        await safe(async () => {
+          if (!state.project) throw new Error("请先选择项目");
+          const form = new FormData();
+          form.append("project_id", state.project.id);
+          form.append("asset_type", "competitor");
+          [...assetFiles.files].forEach((file) => form.append("files", file));
+          await api("/api/assets", { method: "POST", body: form });
+          assetFiles.value = "";
+          await refreshDetail();
+        }, "正在上传竞品图...");
+      }
+
+      async function uploadReferences() {
+        await safe(async () => {
+          if (!state.project) throw new Error("请先选择项目");
+          const form = new FormData();
+          form.append("project_id", state.project.id);
+          form.append("asset_type", refAssetType.value);
+          form.append("slot", refSlot.value);
+          form.append("notes", refNotes.value);
+          [...refFiles.files].forEach((file) => form.append("files", file));
+          await api("/api/assets", { method: "POST", body: form });
+          refFiles.value = "";
+          await refreshDetail();
+        }, "正在上传参考图...");
+      }
+
+      async function uploadOneDocxAsset(fileInput, assetType, slot, notes) {
+        if (!fileInput.files[0]) return "";
+        const form = new FormData();
+        form.append("project_id", state.project.id);
+        form.append("asset_type", assetType);
+        form.append("slot", slot);
+        form.append("notes", notes);
+        form.append("files", fileInput.files[0]);
+        const uploaded = await api("/api/assets", { method: "POST", body: form });
+        fileInput.value = "";
+        return uploaded[0]?.id || "";
+      }
+
+      async function uploadDocxRequiredAssets() {
+        await safe(async () => {
+          if (!state.project) throw new Error("请先选择项目");
+          const uploads = await Promise.all([
+            uploadOneDocxAsset(docxProductFile, "product", "product_image", "DOCX流程：产品图"),
+            uploadOneDocxAsset(docxModelFile, "model", "model_reference", "DOCX流程：模特面部及身材参考图"),
+            uploadOneDocxAsset(docxFitFile, "competitor", "fit_reference", "DOCX流程：衣服上身效果参考图"),
+            uploadOneDocxAsset(docxSceneFile, "competitor", "scene_style_reference", "DOCX流程：场景风格参考图"),
+          ]);
+          await refreshDetail();
+          if (uploads[0]) docxProductAsset.value = uploads[0];
+          if (uploads[1]) docxModelAsset.value = uploads[1];
+          if (uploads[2]) docxFitAsset.value = uploads[2];
+          if (uploads[3]) docxSceneAsset.value = uploads[3];
+          renderDocxWorkflow();
+        }, "正在上传 DOCX 流程所需图片...");
+      }
+
+      function renderAssets() {
+        assets.innerHTML = competitorAssets().map(assetFigure).join("") || `<div class="muted">暂无竞品图</div>`;
+        productAssets.innerHTML = productAssetsList().map(assetFigure).join("") || `<div class="muted">暂无商品参考图</div>`;
+        modelAssets.innerHTML = modelAssetsList().map(assetFigure).join("") || `<div class="muted">暂无模特参考图</div>`;
+      }
+
+      function assetFigure(asset) {
+        const thumb = asset.url
+          ? `<img src="${API}${asset.url}" alt="${escapeAttr(asset.original_name)}">`
+          : `<div class="asset-missing">文件缺失<br>请删除后重新上传</div>`;
+        return `<figure>${thumb}<figcaption title="${escapeAttr(asset.original_name)}">${escapeHtml(asset.original_name)}${asset.slot ? `<br><small>${escapeHtml(asset.slot)}</small>` : ""}</figcaption><button class="icon-btn danger fig-del" title="删除" onclick="deleteAsset('${asset.id}')">✕</button></figure>`;
+      }
+
+      async function runDynamicAnalysis() {
+        await safe(async () => {
+          if (!state.project) throw new Error("请先选择项目");
+          const asset_ids = allCompetitorAssetIds();
+          if (!asset_ids.length) throw new Error("请先上传竞品图");
+          documentList.innerHTML = `<div class="card"><b>正在生成动态 JSON</b><p>AI 会为每张图自动发现字段和值，并汇总品类规范。</p></div>`;
+          state.workflowPreview = await api("/api/dynamic-analysis/preview", {
+            method: "POST",
+            body: JSON.stringify({
+              project_id: state.project.id,
+              asset_ids,
+              model_name: selectedAnalysisModel(),
+              supplemental_info: supplemental.value,
+            }),
+          });
+          await refreshDetail();
+        }, "正在自动分析竞品图并生成 JSON...");
+      }
+
+      function renderDocuments() {
+        const docs = state.documents || [];
+        const html = docs.length ? docs.map((doc) => {
+          const label = doc.document_type === "category_standard" ? "总品类规范" : "单图分析";
+          const summary = doc.document?.summary || "";
+          return `<div class="card doc-card ${state.editingDocument?.id === doc.id ? "active" : ""}" onclick="editDocument('${doc.id}')">
+            <b>${label} · ${escapeHtml(doc.status)}</b>
+            <small>${escapeHtml(doc.model_name || "")} ${doc.asset_id ? " · 图片 " + doc.asset_id.slice(0, 8) : ""}</small>
+            <p>${escapeHtml(summary).slice(0, 160)}</p>
+          </div>`;
+        }).join("") : `<div class="muted">还没有 JSON 文档。</div>`;
+        documentList.innerHTML = html;
+        generationDocumentList.innerHTML = html;
+      }
+
+      function editDocument(id) {
+        const found = (state.documents || []).find((doc) => doc.id === id);
+        state.editingDocument = clone(found);
+        if (state.activeModule !== "analysis") state.activeModule = "analysis";
+        render();
+      }
+
+      function renderEditor() {
+        if (!state.editingDocument) {
+          editorEmpty.style.display = "block";
+          editorPanel.style.display = "none";
+          return;
+        }
+        editorEmpty.style.display = "none";
+        editorPanel.style.display = "block";
+        const document = state.editingDocument.document || { groups: [] };
+        groupEditor.innerHTML = (document.groups || []).map((group, groupIndex) => renderGroup(group, groupIndex)).join("");
+        advancedJson.value = JSON.stringify(document, null, 2);
+      }
+
+      function renderGroup(group, groupIndex) {
+        const fields = group.fields || [];
+        return `<div class="group">
+          <div class="group-head">
+            <input value="${escapeAttr(group.key || "")}" onchange="updateGroup(${groupIndex}, 'key', this.value)" placeholder="分组 key" />
+            <input value="${escapeAttr(group.label || "")}" onchange="updateGroup(${groupIndex}, 'label', this.value)" placeholder="分组名称" />
+            <button class="danger" onclick="removeGroup(${groupIndex})">删除分组</button>
+          </div>
+          ${fields.map((field, fieldIndex) => renderField(field, groupIndex, fieldIndex)).join("")}
+          <button onclick="addField(${groupIndex})">新增字段</button>
+        </div>`;
+      }
+
+      function renderField(field, groupIndex, fieldIndex) {
+        return `<div class="field-row">
+          <input value="${escapeAttr(field.key || "")}" onchange="updateField(${groupIndex}, ${fieldIndex}, 'key', this.value)" placeholder="字段 key" />
+          <input value="${escapeAttr(field.label || "")}" onchange="updateField(${groupIndex}, ${fieldIndex}, 'label', this.value)" placeholder="字段名称" />
+          <select onchange="updateField(${groupIndex}, ${fieldIndex}, 'type', this.value)">
+            ${FIELD_TYPES.map((type) => `<option value="${type}" ${field.type === type ? "selected" : ""}>${type}</option>`).join("")}
+          </select>
+          <textarea onchange="updateField(${groupIndex}, ${fieldIndex}, 'value', parseValue(this.value, '${field.type || "text"}'))">${escapeHtml(formatValue(field.value))}</textarea>
+          <textarea onchange="updateField(${groupIndex}, ${fieldIndex}, 'reason', this.value)" placeholder="依据/备注">${escapeHtml(field.reason || "")}</textarea>
+          <button class="danger" onclick="removeField(${groupIndex}, ${fieldIndex})">删除</button>
+        </div>`;
+      }
+
+      function updateGroup(groupIndex, key, value) {
+        state.editingDocument.document.groups[groupIndex][key] = value;
+        advancedJson.value = JSON.stringify(state.editingDocument.document, null, 2);
+      }
+
+      function updateField(groupIndex, fieldIndex, key, value) {
+        state.editingDocument.document.groups[groupIndex].fields[fieldIndex][key] = value;
+        advancedJson.value = JSON.stringify(state.editingDocument.document, null, 2);
+        if (key === "type") renderEditor();
+      }
+
+      function addGroup() {
+        state.editingDocument.document.groups = state.editingDocument.document.groups || [];
+        state.editingDocument.document.groups.push({ key: `group_${Date.now()}`, label: "新分组", fields: [] });
+        renderEditor();
+      }
+
+      function removeGroup(groupIndex) {
+        state.editingDocument.document.groups.splice(groupIndex, 1);
+        renderEditor();
+      }
+
+      function addField(groupIndex) {
+        state.editingDocument.document.groups[groupIndex].fields.push({ key: `field_${Date.now()}`, label: "新字段", type: "text", value: "", reason: "" });
+        renderEditor();
+      }
+
+      function removeField(groupIndex, fieldIndex) {
+        state.editingDocument.document.groups[groupIndex].fields.splice(fieldIndex, 1);
+        renderEditor();
+      }
+
+      function toggleAdvancedJson() {
+        advancedJson.style.display = advancedJson.style.display === "none" ? "block" : "none";
+      }
+
+      async function saveEditingDocument(status) {
+        await safe(async () => {
+          if (!state.editingDocument) throw new Error("请先选择 JSON 文档");
+          let document = state.editingDocument.document;
+          if (advancedJson.style.display !== "none") document = JSON.parse(advancedJson.value);
+          const saved = await api(`/api/analysis-documents/${state.editingDocument.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ document, status, notes: "前端人工编辑" }),
+          });
+          state.editingDocument = saved;
+          await refreshDetail();
+        }, "正在保存 JSON 文档...");
+      }
+
+      function renderPromptPreview() {
+        const previews = state.workflowPreview?.prompt_previews || [];
+        promptPreview.innerHTML = previews.length
+          ? previews.map((item, index) => `<div class="card"><b>提示词 ${index + 1}</b><small>${escapeHtml(item.document_id || "")}</small><pre class="prompt">${escapeHtml(item.prompt || "")}</pre></div>`).join("")
+          : `<div class="muted">生成动态 JSON 后会在这里展示提示词预览。</div>`;
+      }
+
+      async function exportPackage() {
+        await safe(async () => {
+          if (!state.project) throw new Error("请先选择项目");
+          const data = await api(`/api/projects/${state.project.id}/analysis-package/export`);
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${state.project.sku || "project"}_analysis_package.json`;
+          a.click();
+          URL.revokeObjectURL(url);
+        }, "正在导出 JSON 包...");
+      }
+
+      function importPackage() {
+        if (!state.project) {
+          errorBox.textContent = "请先选择项目";
+          errorBox.style.display = "block";
+          return;
+        }
+        importFile.click();
+      }
+
+      async function handleImportFile() {
+        await safe(async () => {
+          const file = importFile.files[0];
+          if (!file) return;
+          const data = JSON.parse(await file.text());
+          await api("/api/analysis-documents/import", {
+            method: "POST",
+            body: JSON.stringify({ project_id: state.project.id, package: data, status: "confirmed" }),
+          });
+          importFile.value = "";
+          state.workflowPreview = null;
+          await refreshDetail();
+        }, "正在导入 JSON 包...");
+      }
+
+      async function generateFromDocuments() {
+        await safe(async () => {
+          if (!state.project) throw new Error("请先选择项目");
+          const competitorDocs = (state.documents || []).filter((doc) => doc.document_type === "competitor_image");
+          const categoryDoc = (state.documents || []).find((doc) => doc.document_type === "category_standard" && doc.status === "confirmed")
+            || (state.documents || []).find((doc) => doc.document_type === "category_standard");
+          if (!competitorDocs.length && !categoryDoc) throw new Error("请先生成或导入 JSON 文档");
+          results.innerHTML = `<div class="card"><b>正在生成整套图片</b><p>当前生图模型：${escapeHtml(selectedImageModel())}</p></div>`;
+          const data = await api("/api/workflows/generate-from-documents", {
+            method: "POST",
+            body: JSON.stringify({
+              project_id: state.project.id,
+              competitor_document_ids: competitorDocs.map((doc) => doc.id),
+              category_document_id: categoryDoc?.id || null,
+              supplemental_info: supplemental.value,
+              product_asset_ids: allReferenceAssetIds("product"),
+              model_asset_ids: allReferenceAssetIds("model"),
+              competitor_asset_ids: allCompetitorAssetIds(),
+              image_model: selectedImageModel(),
+              size: "1024x1024",
+              quality: "high",
+            }),
+          });
+          renderResults(data.results || []);
+          await refreshDetail();
+        }, "正在一键生成整套图片...");
+      }
+
+      function renderResults(list) {
+        results.innerHTML = list.map((result) => {
+          const params = result.params || {};
+          if (result.status === "success" && result.url) {
+            const imageUrl = `${API}${result.url}`;
+            return `<figure>
+              <img src="${imageUrl}" alt="generated" onclick="openImageModal('${imageUrl}', '生成结果 ${result.id.slice(0, 8)}')" title="点击放大查看">
+              <figcaption title="${escapeAttr(params.image_model || "")}">
+                ${escapeHtml(params.image_model || "image model")}
+                <button onclick="markCandidate('${result.id}')">标记知识库候选</button>
+              </figcaption>
+            </figure>`;
+          }
+          return `<div class="card"><b class="status-fail">生成失败</b><p>${escapeHtml(result.error || "未返回图片")}</p><small>${escapeHtml(params.image_model || "")}</small></div>`;
+        }).join("");
+      }
+
+      async function markCandidate(id) {
+        await safe(async () => {
+          await api(`/api/generation-results/${id}/review`, { method: "POST", body: JSON.stringify({ rating: 5, review_notes: "优秀动态 JSON 实验", is_knowledge_candidate: true }) });
+        }, "正在标记知识库候选...");
+      }
+
+      function allAssets() {
+        return state.detail?.assets || [];
+      }
+
+      function optionListForAssets(slotHint) {
+        const slotTypes = {
+          product_image: ["product"],
+          model_reference: ["model"],
+          fit_reference: ["competitor"],
+          scene_style_reference: ["competitor"],
+        };
+        const slotLabels = {
+          product_image: "产品图",
+          model_reference: "模特参考",
+          fit_reference: "上身效果参考",
+          scene_style_reference: "场景风格参考",
+        };
+        const allowedTypes = slotTypes[slotHint] || ["product", "model", "competitor"];
+        const assets = allAssets().filter((asset) => asset.url && allowedTypes.includes(asset.asset_type));
+        const slotMatched = assets.filter((asset) => asset.slot === slotHint);
+        const fallback = assets.filter((asset) => !asset.slot);
+        const visibleAssets = slotMatched.length ? slotMatched : fallback;
+        const sorted = [...visibleAssets].sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+        return `<option value="">请选择</option>` + sorted.map((asset) => {
+          const typeLabel = asset.asset_type === "product" ? "商品" : asset.asset_type === "model" ? "模特" : "竞品";
+          const slot = asset.slot ? ` · ${slotLabels[asset.slot] || asset.slot}` : "";
+          return `<option value="${escapeAttr(asset.id)}">[${typeLabel}] ${escapeHtml(asset.original_name)}${escapeHtml(slot)}</option>`;
+        }).join("");
+      }
+
+      function keepSelectValue(selectEl, html) {
+        const current = selectEl.value;
+        selectEl.innerHTML = html;
+        if ([...selectEl.options].some((option) => option.value === current)) selectEl.value = current;
+      }
+
+      function renderDocxWorkflow() {
+        const currentStyle = docxStyleSelect.value;
+        docxStyleSelect.innerHTML = state.docxStyles.length
+          ? state.docxStyles.map((style) => `<option value="${escapeAttr(style.key)}">${escapeHtml(style.label)}</option>`).join("")
+          : `<option value="natural_fashion">裸妆感·高级时尚自然</option>`;
+        if (currentStyle) {
+          docxStyleSelect.value = currentStyle;
+        } else if ([...docxStyleSelect.options].some((option) => option.value === "natural_fashion")) {
+          docxStyleSelect.value = "natural_fashion";
+        }
+
+        if (document.getElementById("docxDownloadButton")) {
+          docxDownloadButton.disabled = !docxRunReadyToDownload(state.docxActiveRun);
+        }
+
+        keepSelectValue(docxProductAsset, optionListForAssets("product_image"));
+        keepSelectValue(docxModelAsset, optionListForAssets("model_reference"));
+        keepSelectValue(docxFitAsset, optionListForAssets("fit_reference"));
+        keepSelectValue(docxSceneAsset, optionListForAssets("scene_style_reference"));
+
+        const runs = state.detail?.docx_workflow_runs || [];
+        docxRunList.innerHTML = runs.length ? runs.map((run) => (
+          `<div class="card doc-card ${state.docxActiveRun?.id === run.id ? "active" : ""}" onclick="loadDocxRun('${run.id}')">
+            <b>${escapeHtml(run.product_name)}</b>
+            <small>${escapeHtml(run.status)} · ${escapeHtml(run.created_at)}</small>
+            <p>${escapeHtml(run.material)}</p>
+          </div>`
+        )).join("") : `<div class="muted">还没有 DOCX 固定流程记录。</div>`;
+
+        renderDocxResults(state.docxActiveRun);
+      }
+
+      function docxPayload() {
+        const product_name = docxProductName.value.trim();
+        const material = docxMaterial.value.trim();
+        if (!state.project) throw new Error("请先选择项目");
+        if (!product_name) throw new Error("产品名称为必填项");
+        if (!material) throw new Error("材质为必填项");
+        if (!docxProductAsset.value || !docxModelAsset.value || !docxFitAsset.value || !docxSceneAsset.value) {
+          throw new Error("请完整选择产品图、模特参考图、上身效果参考图和场景风格参考图");
+        }
+        return {
+          project_id: state.project.id,
+          product_name,
+          material,
+          style_key: docxStyleSelect.value || "natural_fashion",
+          product_asset_id: docxProductAsset.value,
+          model_asset_id: docxModelAsset.value,
+          fit_asset_id: docxFitAsset.value,
+          scene_asset_id: docxSceneAsset.value,
+          image_model: selectedImageModel(),
+          size: selectedDocxSize(),
+          quality: selectedDocxQuality(),
+        };
+      }
+
+      async function createDocxRun() {
+        return api("/api/docx-workflow/runs", {
+          method: "POST",
+          body: JSON.stringify(docxPayload()),
+        });
+      }
+
+      async function previewDocxWorkflow() {
+        await safe(async () => {
+          const run = await createDocxRun();
+          state.docxActiveRun = await api(`/api/docx-workflow/runs/${run.id}/preview`, { method: "POST" });
+          await refreshDetail();
+        }, "正在生成 DOCX 固定流程提示词预览...");
+      }
+
+      async function generateDocxWorkflow() {
+        await safe(async () => {
+          const run = state.docxActiveRun || await createDocxRun();
+          if (state.docxActiveRun) await saveVisibleDocxPrompts(false);
+          state.docxActiveRun = await api(`/api/docx-workflow/runs/${run.id}`);
+          renderDocxWorkflow();
+          const generatePromise = api(`/api/docx-workflow/runs/${run.id}/generate`, {
+            method: "POST",
+            body: JSON.stringify({ image_model: selectedImageModel(), size: selectedDocxSize(), quality: selectedDocxQuality() }),
+          });
+          let finished = false;
+          generatePromise.then(() => { finished = true; }, () => { finished = true; });
+          while (!finished) {
+            await sleep(2500);
+            try {
+              state.docxActiveRun = await api(`/api/docx-workflow/runs/${run.id}`);
+              patchDocxGeneratedMedia(state.docxActiveRun);
+            } catch (pollErr) {
+              console.warn("DOCX run poll failed", pollErr);
+            }
+          }
+          state.docxActiveRun = await generatePromise;
+          patchDocxGeneratedMedia(state.docxActiveRun);
+          if (state.project) state.detail = await api(`/api/projects/${state.project.id}`);
+        }, "正在按 DOCX 固定流程生成 9 张图...");
+      }
+
+      async function downloadDocxRun() {
+        await safe(async () => {
+          if (!state.docxActiveRun?.id) throw new Error("请先选择或生成一个 DOCX 流程");
+          if (!docxRunReadyToDownload(state.docxActiveRun)) throw new Error("9 张图还没有全部生成成功，暂时不能下载");
+          const res = await fetch(`${API}/api/docx-workflow/runs/${state.docxActiveRun.id}/download`);
+          if (!res.ok) throw new Error(await res.text());
+          const blob = await res.blob();
+          const disposition = res.headers.get("Content-Disposition") || "";
+          const match = disposition.match(/filename="([^"]+)"/);
+          const filename = match?.[1] || `${state.project?.sku || "docx"}_${state.docxActiveRun.id.slice(0, 8)}_images.zip`;
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = filename;
+          a.click();
+          URL.revokeObjectURL(url);
+        }, "正在打包下载 9 张图...");
+      }
+
+      async function regenerateDocxStep(stepId) {
+        await safe(async () => {
+          if (!state.docxActiveRun?.id) throw new Error("请先选择或生成一个 DOCX 流程");
+          await saveDocxPrompt(stepId, false);
+          if (state.docxActiveRun?.steps) {
+            state.docxActiveRun.steps = state.docxActiveRun.steps.map((step) => (
+              step.id === stepId ? { ...step, status: "running", error: "", url: "" } : step
+            ));
+            patchDocxGeneratedMedia(state.docxActiveRun);
+          }
+          state.docxActiveRun = await api(`/api/docx-workflow/steps/${stepId}/generate`, {
+            method: "POST",
+            body: JSON.stringify({ image_model: selectedImageModel(), size: selectedDocxSize(), quality: selectedDocxQuality() }),
+          });
+          patchDocxGeneratedMedia(state.docxActiveRun);
+          if (state.project) state.detail = await api(`/api/projects/${state.project.id}`);
+        }, "正在重新生成这张图...");
+      }
+
+      async function loadDocxRun(id) {
+        await safe(async () => {
+          state.docxActiveRun = await api(`/api/docx-workflow/runs/${id}`);
+          if (state.docxActiveRun?.size && document.getElementById("docxSizeSelect")) docxSizeSelect.value = state.docxActiveRun.size;
+          if (state.docxActiveRun?.quality && document.getElementById("docxQualitySelect")) docxQualitySelect.value = state.docxActiveRun.quality;
+          renderDocxWorkflow();
+        }, "正在加载 DOCX 流程...");
+      }
+
+      async function saveDocxPrompt(stepId, refreshAfter = true) {
+        const input = document.getElementById(`prompt_${stepId}`);
+        if (!input) return null;
+        const updated = await api(`/api/docx-workflow/steps/${stepId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ prompt: input.value }),
+        });
+        if (state.docxActiveRun?.steps) {
+          state.docxActiveRun.steps = state.docxActiveRun.steps.map((step) => step.id === stepId ? { ...step, ...updated } : step);
+        }
+        if (refreshAfter) renderDocxWorkflow();
+        return updated;
+      }
+
+      async function saveVisibleDocxPrompts(refreshAfter = true) {
+        const steps = state.docxActiveRun?.steps || [];
+        await Promise.all(steps.map((step) => saveDocxPrompt(step.id, false)));
+        if (refreshAfter) renderDocxWorkflow();
+      }
+
+      function availableDocxRefAssets() {
+        return (state.detail?.assets || []).filter((asset) => asset.url);
+      }
+
+      function docxAssetOptionHtml(selectedId = "") {
+        return `<option value="">选择已有素材</option>` + availableDocxRefAssets().map((asset) => {
+          const typeLabel = asset.asset_type === "product" ? "商品" : asset.asset_type === "model" ? "模特" : "竞品";
+          const slot = asset.slot ? ` · ${asset.slot}` : "";
+          return `<option value="${escapeAttr(asset.id)}" ${asset.id === selectedId ? "selected" : ""}>[${typeLabel}] ${escapeHtml(asset.original_name)}${escapeHtml(slot)}</option>`;
+        }).join("");
+      }
+
+      function currentDocxStep(stepId) {
+        return (state.docxActiveRun?.steps || []).find((step) => step.id === stepId);
+      }
+
+      function currentDocxRefs(stepId) {
+        const step = currentDocxStep(stepId);
+        return clone(step?.input_refs || []);
+      }
+
+      async function updateDocxStepRefs(stepId, refs) {
+        const input = document.getElementById(`prompt_${stepId}`);
+        await api(`/api/docx-workflow/steps/${stepId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ prompt: input?.value || currentDocxStep(stepId)?.prompt || "", input_refs: refs }),
+        });
+        if (state.docxActiveRun?.id) state.docxActiveRun = await api(`/api/docx-workflow/runs/${state.docxActiveRun.id}`);
+        renderDocxWorkflow();
+      }
+
+      async function removeDocxRef(stepId, index) {
+        await safe(async () => {
+          const refs = currentDocxRefs(stepId);
+          refs.splice(index, 1);
+          await updateDocxStepRefs(stepId, refs);
+        }, "正在删除该步骤参考图...");
+      }
+
+      async function replaceDocxRefWithAsset(stepId, index, assetId) {
+        if (!assetId) return;
+        await safe(async () => {
+          const refs = currentDocxRefs(stepId);
+          refs[index] = { type: "asset", id: assetId };
+          await updateDocxStepRefs(stepId, refs);
+        }, "正在替换参考图...");
+      }
+
+      async function addExistingDocxRef(stepId, selectId) {
+        const select = document.getElementById(selectId);
+        const assetId = select?.value || "";
+        if (!assetId) return;
+        await safe(async () => {
+          const refs = currentDocxRefs(stepId);
+          refs.push({ type: "asset", id: assetId });
+          await updateDocxStepRefs(stepId, refs);
+        }, "正在添加已有参考图...");
+      }
+
+      async function uploadDocxRefAsset(stepId, index, fileInput) {
+        const file = fileInput.files?.[0];
+        if (!file || !state.project) return;
+        await safe(async () => {
+          const form = new FormData();
+          form.append("project_id", state.project.id);
+          form.append("asset_type", "competitor");
+          form.append("slot", "docx_step_reference");
+          form.append("notes", `DOCX步骤参考图 ${stepId}`);
+          form.append("files", file);
+          const uploaded = await api("/api/assets", { method: "POST", body: form });
+          const assetId = uploaded[0]?.id || "";
+          if (!assetId) throw new Error("上传失败，未返回素材ID");
+          await refreshDetail();
+          const refs = currentDocxRefs(stepId);
+          if (index >= 0) refs[index] = { type: "asset", id: assetId };
+          else refs.push({ type: "asset", id: assetId });
+          await updateDocxStepRefs(stepId, refs);
+          fileInput.value = "";
+        }, index >= 0 ? "正在上传并替换参考图..." : "正在上传并添加参考图...");
+      }
+
+      function startDocxRefDrag(event, stepId, index) {
+        docxDraggingRef = { stepId, index };
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", JSON.stringify(docxDraggingRef));
+      }
+
+      function allowDocxRefDrop(event) {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = "move";
+      }
+
+      async function dropDocxRef(event, stepId, targetIndex) {
+        event.preventDefault();
+        let dragging = docxDraggingRef;
+        try {
+          dragging = JSON.parse(event.dataTransfer.getData("text/plain")) || dragging;
+        } catch (_) {}
+        if (!dragging || dragging.stepId !== stepId || dragging.index === targetIndex) return;
+        await safe(async () => {
+          const refs = currentDocxRefs(stepId);
+          const [moved] = refs.splice(dragging.index, 1);
+          refs.splice(targetIndex, 0, moved);
+          await updateDocxStepRefs(stepId, refs);
+        }, "正在调整参考图顺序...");
+      }
+
+      function docxRefThumbHtml(item) {
+        return item.url
+          ? `<img src="${API}${item.url}" alt="${escapeAttr(item.label || "reference")}">`
+          : `<span>${item.type === "step" ? "等待前置结果" : "文件缺失"}</span>`;
+      }
+
+      function docxRefMetaText(item) {
+        return item.type === "step"
+          ? `前置步骤${item.image_no ? ` #${item.image_no}` : ""} · ${item.status || ""}`
+          : `${item.asset_type || "素材"}${item.slot ? ` · ${item.slot}` : ""}`;
+      }
+
+      function renderDocxRefPanel(step) {
+        const items = step.reference_items || [];
+        const addSelectId = `add_ref_${step.id}`;
+        const list = items.length ? items.map((item, index) => {
+          const thumb = item.url
+            ? `<img src="${API}${item.url}" alt="${escapeAttr(item.label || "reference")}">`
+            : `<span>${item.type === "step" ? "等待前置结果" : "文件缺失"}</span>`;
+          const meta = item.type === "step"
+            ? `前置步骤${item.image_no ? ` #${item.image_no}` : ""} · ${item.status || ""}`
+            : `${item.asset_type || "素材"}${item.slot ? ` · ${item.slot}` : ""}`;
+          return `<div class="docx-ref-item" draggable="true" ondragstart="startDocxRefDrag(event, '${step.id}', ${index})" ondragover="allowDocxRefDrop(event)" ondrop="dropDocxRef(event, '${step.id}', ${index})">
+            <div class="docx-ref-order" title="拖动调整顺序">图${index + 1}</div>
+            <div id="docx_ref_thumb_${escapeAttr(step.id)}_${index}" class="docx-ref-thumb">${thumb}</div>
+            <div class="docx-ref-body">
+              <b title="${escapeAttr(item.label || "")}">${escapeHtml(item.label || "参考图")}</b>
+              <small id="docx_ref_meta_${escapeAttr(step.id)}_${index}">${escapeHtml(meta)}</small>
+              <select onchange="replaceDocxRefWithAsset('${step.id}', ${index}, this.value)">${docxAssetOptionHtml(item.type === "asset" ? item.id : "")}</select>
+              <input type="file" accept="image/*" onchange="uploadDocxRefAsset('${step.id}', ${index}, this)" />
+              <div class="docx-ref-actions">
+                <button onclick="removeDocxRef('${step.id}', ${index})">删除</button>
+              </div>
+            </div>
+          </div>`;
+        }).join("") : `<div class="muted">当前步骤没有参考图。可以添加已有素材或重新上传。</div>`;
+        return `<div class="docx-ref-panel">
+          <div class="docx-ref-title"><b>参考图顺序</b><small>拖动后即更新模型收到的图1、图2顺序</small></div>
+          <div class="docx-ref-list">${list}</div>
+          <div class="docx-ref-add">
+            <select id="${addSelectId}">${docxAssetOptionHtml()}</select>
+            <div class="docx-ref-actions">
+              <button onclick="addExistingDocxRef('${step.id}', '${addSelectId}')">添加已有素材</button>
+              <label class="row" style="margin:0; flex:1">
+                <input type="file" accept="image/*" onchange="uploadDocxRefAsset('${step.id}', -1, this)" />
+              </label>
+            </div>
+          </div>
+        </div>`;
+      }
+
+      function docxStepMediaHtml(step) {
+        return step.url
+          ? `<img src="${API}${step.url}" alt="${escapeAttr(step.title)}" onclick="openImageModal('${API}${step.url}', '${escapeAttr(step.title)}')" title="点击放大查看">`
+          : `<div class="step-placeholder">${escapeHtml(step.error || "等待生成")}</div>`;
+      }
+
+      function patchDocxGeneratedMedia(run) {
+        const steps = run?.steps || [];
+        if (!steps.length) return;
+        for (const step of steps) {
+          const card = document.getElementById(`docx_card_${step.id}`);
+          const media = document.getElementById(`docx_media_${step.id}`);
+          const status = document.getElementById(`docx_status_${step.id}`);
+          if (!card || !media || !status) {
+            continue;
+          }
+          card.className = `card docx-step-card ${step.status || ""}`;
+          media.innerHTML = docxStepMediaHtml(step);
+          status.textContent = step.status || "";
+          (step.reference_items || []).forEach((item, index) => {
+            const thumb = document.getElementById(`docx_ref_thumb_${step.id}_${index}`);
+            const meta = document.getElementById(`docx_ref_meta_${step.id}_${index}`);
+            if (thumb) thumb.innerHTML = docxRefThumbHtml(item);
+            if (meta) meta.textContent = docxRefMetaText(item);
+          });
+        }
+        if (document.getElementById("docxDownloadButton")) {
+          docxDownloadButton.disabled = !docxRunReadyToDownload(run);
+        }
+      }
+
+      function renderDocxResults(run) {
+        const steps = run?.steps || [];
+        docxResults.innerHTML = steps.length ? steps.map((step) => {
+          return `<div id="docx_card_${escapeAttr(step.id)}" class="card docx-step-card ${escapeAttr(step.status || "")}">
+            <div class="step-head"><span>#${step.image_no}</span><b>${escapeHtml(step.title)}</b><small id="docx_status_${escapeAttr(step.id)}">${escapeHtml(step.status)}</small></div>
+            <div id="docx_media_${escapeAttr(step.id)}">${docxStepMediaHtml(step)}</div>
+            ${renderDocxRefPanel(step)}
+            <textarea id="prompt_${escapeAttr(step.id)}" class="prompt">${escapeHtml(step.prompt || "")}</textarea>
+            <div class="row" style="padding: 8px">
+              <button onclick="saveDocxPrompt('${step.id}')">保存提示词</button>
+              <button onclick="regenerateDocxStep('${step.id}')">重新生成本张</button>
+            </div>
+          </div>`;
+        }).join("") : `<div class="muted">预览或生成后会在这里展示 9 个步骤。</div>`;
+      }
+
+      function openImageModal(src, caption) {
+        modalImage.src = src;
+        modalCaption.textContent = caption || "生成结果预览";
+        imageModal.style.display = "flex";
+      }
+
+      function closeImageModal() {
+        modalImage.src = "";
+        imageModal.style.display = "none";
+      }
+
+      function formatValue(value) {
+        if (Array.isArray(value)) return value.join("\n");
+        if (typeof value === "object" && value !== null) return JSON.stringify(value, null, 2);
+        return value ?? "";
+      }
+
+      function parseValue(raw, type) {
+        if (type === "boolean") return ["true", "是", "yes", "1"].includes(String(raw).trim().toLowerCase());
+        if (type === "number") return Number(raw || 0);
+        if (type === "list" || type === "multi_select") return String(raw || "").split("\n").map((item) => item.trim()).filter(Boolean);
+        return raw || "";
+      }
+
+      function clone(value) {
+        return JSON.parse(JSON.stringify(value || null));
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
+      }
+
+      function escapeAttr(value) {
+        return escapeHtml(value).replace(/`/g, "&#96;");
+      }
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeImageModal();
+      });
+
+      [
+        "docxProductName",
+        "docxMaterial",
+        "docxStyleSelect",
+        "docxImageModelSelect",
+        "docxSizeSelect",
+        "docxQualitySelect",
+        "docxProductAsset",
+        "docxModelAsset",
+        "docxFitAsset",
+        "docxSceneAsset",
+      ].forEach((id) => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener("change", () => {
+          state.docxActiveRun = null;
+          renderDocxWorkflow();
+        });
+      });
+
+      boot();
+    </script>
+  </body>
+</html>
