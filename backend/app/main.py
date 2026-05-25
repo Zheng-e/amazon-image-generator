@@ -125,6 +125,15 @@ class RagReferenceUpdateIn(BaseModel):
     sort_order: int | None = None
 
 
+class KnowledgeCandidateIn(BaseModel):
+    rating: int | None = None
+    review_notes: str = ""
+    suggested_category: str = ""
+    suggested_scene: str = ""
+    suggested_image_type: str = ""
+    suggested_metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 def parse_json_object(text: str) -> dict[str, Any]:
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -753,6 +762,43 @@ def regenerate_docx_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn 
             )
             update_docx_run_status_after_step(conn, run["id"], image_response.get("model") or image_model or "", size, quality)
             return fetch_docx_run_package(conn, run["id"])
+
+
+@app.post("/api/docx-workflow/steps/{step_id}/knowledge-candidate")
+def create_docx_knowledge_candidate(step_id: str, payload: KnowledgeCandidateIn) -> dict:
+    with get_db() as conn:
+        step = fetch_one(conn, "SELECT * FROM docx_workflow_steps WHERE id = ?", (step_id,))
+        run = fetch_one(conn, "SELECT * FROM docx_workflow_runs WHERE id = ?", (step["run_id"],))
+        image_path = Path(step.get("image_path") or "")
+        if step.get("status") != "success" or not image_path.is_file():
+            raise HTTPException(400, "只有已成功生成的图片可以标记为知识库候选")
+        candidate_id = new_id()
+        conn.execute(
+            """
+            INSERT INTO docx_knowledge_candidates
+            (id, project_id, run_id, step_id, image_path, rating, review_notes,
+             suggested_category, suggested_scene, suggested_image_type, suggested_metadata_json,
+             status, created_at, ingested_rag_image_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                candidate_id,
+                run["project_id"],
+                run["id"],
+                step_id,
+                str(image_path),
+                payload.rating,
+                payload.review_notes,
+                payload.suggested_category,
+                payload.suggested_scene,
+                payload.suggested_image_type,
+                to_json(payload.suggested_metadata),
+                "pending",
+                now_iso(),
+                "",
+            ),
+        )
+        return row_to_dict(conn.execute("SELECT * FROM docx_knowledge_candidates WHERE id = ?", (candidate_id,)).fetchone())
 
 
 @app.post("/api/docx-workflow/runs/{run_id}/generate")
