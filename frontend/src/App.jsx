@@ -615,6 +615,32 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
     }
   };
 
+  const markKnowledgeCandidate = async (step) => {
+    if (!step?.id || !step.url) return;
+    setBusy(true);
+    try {
+      await request(`/api/docx-workflow/steps/${step.id}/knowledge-candidate`, {
+        method: "POST",
+        body: JSON.stringify({
+          rating: 5,
+          review_notes: "九图流程人工标记候选",
+          suggested_category: project.category || "",
+          suggested_scene: "",
+          suggested_image_type: step.title || "",
+          suggested_metadata: {
+            sku: project.sku,
+            project_name: project.name,
+            docx_stage_id: step.stage_id,
+            image_no: step.image_no,
+          },
+        }),
+      });
+      alert("已保存为知识库候选");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const loadRun = async (runId) => {
     const run = await request(`/api/docx-workflow/runs/${runId}`);
     setActiveRun(run);
@@ -746,6 +772,10 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
                 <div className="docx-actions">
                   <button onClick={() => savePrompt(step.id, promptDrafts[step.id] ?? step.prompt ?? "")}>保存提示词</button>
                   <button onClick={() => regenerateStep(step.id)} disabled={busy}>重新生成本张</button>
+                  <button onClick={() => markKnowledgeCandidate(step)} disabled={busy || !step.url}>
+                    <Star size={14} />
+                    标记知识库候选
+                  </button>
                 </div>
               </article>
             ))}

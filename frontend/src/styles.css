@@ -752,3 +752,112 @@ figure:hover .figure-del {
     grid-column: span 1;
   }
 }
+
+.rag-workbench {
+  display: grid;
+  gap: 16px;
+}
+
+.rag-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #475569;
+  font-size: 13px;
+}
+
+.status-ok {
+  color: #047857;
+  font-weight: 700;
+}
+
+.status-fail {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.rag-search-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 110px minmax(220px, 0.7fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.rag-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.rag-card {
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.rag-card img {
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  background: #f8fafc;
+}
+
+.rag-card-body {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.rag-card-body span,
+.rag-card-body small,
+.rag-card-body em,
+.muted {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.rag-reference-pool {
+  display: grid;
+  gap: 10px;
+}
+
+.rag-reference-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+
+.rag-reference-row img {
+  width: 76px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #f8fafc;
+}
+
+.tag-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+
+.tag-grid label {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  color: #334155;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .rag-search-grid {
+    grid-template-columns: 1fr;
+  }
+}
