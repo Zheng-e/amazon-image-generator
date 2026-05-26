@@ -522,7 +522,10 @@ figcaption small {
   border: 1px solid #d7e0e5;
   border-radius: 8px;
   overflow: hidden;
+  min-width: 0;
   background: #ffffff;
+  display: flex;
+  flex-direction: column;
 }
 
 .workflow-step.success {
@@ -558,11 +561,12 @@ figcaption small {
   color: #6d6a62;
 }
 
-.workflow-step img {
+.workflow-step > img {
   width: 100%;
-  aspect-ratio: 1;
-  object-fit: cover;
+  max-height: 200px;
+  object-fit: contain;
   display: block;
+  background: #f6f9fa;
 }
 
 .step-placeholder {
@@ -896,6 +900,9 @@ figure:hover .figure-del {
   display: flex;
   align-items: flex-start;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   padding: 6px 0;
   border-bottom: 1px solid #e2e8f0;
 }
@@ -910,31 +917,98 @@ figure:hover .figure-del {
   object-fit: cover;
   border-radius: 4px;
   background: #fff;
-  flex-shrink: 0;
+  flex: 0 0 48px;
 }
 
-.step-rag-ref-item div {
-  flex: 1;
+.step-rag-ref-text {
+  flex: 1 1 auto;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
-.step-rag-ref-item span {
+.step-rag-ref-text span {
   font-size: 12px;
   font-weight: 600;
   color: #1e293b;
   display: block;
 }
 
-.step-rag-ref-item small {
+.step-rag-ref-text small {
   font-size: 11px;
   color: #64748b;
   display: block;
   margin-top: 2px;
 }
 
+.step-rag-ref-item .icon-btn {
+  flex: 0 0 auto;
+}
+
 .step-rag-refs .muted {
   font-size: 12px;
   color: #94a3b8;
+}
+
+.clickable-img {
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.clickable-img:hover {
+  opacity: 0.85;
+}
+
+.image-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: rgba(0, 0, 0, 0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.image-preview-content {
+  position: relative;
+  max-width: 90vw;
+  max-height: 90vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-preview-content img {
+  max-width: 90vw;
+  max-height: 90vh;
+  object-fit: contain;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.image-preview-close {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: #fff;
+  color: #1e293b;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  z-index: 1;
+}
+
+.image-preview-close:hover {
+  background: #f1f5f9;
 }
 
 @media (max-width: 900px) {

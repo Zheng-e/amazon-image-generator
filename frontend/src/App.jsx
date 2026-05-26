@@ -38,6 +38,20 @@ function defaultRagQuery(project) {
     .join(" ");
 }
 
+function ImagePreviewModal({ src, alt, onClose }) {
+  if (!src) return null;
+  return (
+    <div className="image-preview-overlay" onClick={onClose}>
+      <div className="image-preview-content" onClick={(e) => e.stopPropagation()}>
+        <button className="image-preview-close" onClick={onClose}>
+          <X size={20} />
+        </button>
+        <img src={src} alt={alt || ""} />
+      </div>
+    </div>
+  );
+}
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function docxRunReadyToDownload(run) {
@@ -190,6 +204,7 @@ function RagKnowledgeWorkbench({ project, refreshProject }) {
   const [selectedTags, setSelectedTags] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [previewImage, setPreviewImage] = useState(null);
 
   const loadReferences = async () => {
     if (!project?.id) return;
@@ -321,7 +336,7 @@ function RagKnowledgeWorkbench({ project, refreshProject }) {
       <div className="rag-results-grid">
         {results.map((item) => (
           <article key={item.image_id} className="rag-card">
-            <img src={`${API}/api/rag/images/${item.image_id}`} alt={item.filename || item.image_id} />
+            <img src={`${API}/api/rag/images/${item.image_id}`} alt={item.filename || item.image_id} className="clickable-img" onClick={() => setPreviewImage({ src: `${API}/api/rag/images/${item.image_id}`, alt: item.filename || item.image_id })} />
             <div className="rag-card-body">
               <strong>{item.filename || item.image_id}</strong>
               <span>{item.category || "未分类"} · {item.scene || "未知场景"}</span>
@@ -348,7 +363,7 @@ function RagKnowledgeWorkbench({ project, refreshProject }) {
         </div>
         {references.length ? references.map((reference) => (
           <article key={reference.id} className="rag-reference-row">
-            <img src={`${API}${reference.image_url}`} alt={reference.filename || reference.rag_image_id} />
+            <img src={`${API}${reference.image_url}`} alt={reference.filename || reference.rag_image_id} className="clickable-img" onClick={() => setPreviewImage({ src: `${API}${reference.image_url}`, alt: reference.filename || reference.rag_image_id })} />
             <div>
               <strong>{reference.filename || reference.rag_image_id}</strong>
               <small>{reference.scene || reference.caption || ""}</small>
@@ -390,6 +405,11 @@ function RagKnowledgeWorkbench({ project, refreshProject }) {
           </article>
         )) : <p className="muted">还没有加入本项目的知识库参考图。</p>}
       </div>
+      <ImagePreviewModal
+        src={previewImage?.src}
+        alt={previewImage?.alt}
+        onClose={() => setPreviewImage(null)}
+      />
     </section>
   );
 }
@@ -461,6 +481,7 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
   const [activeRun, setActiveRun] = useState(null);
   const [promptDrafts, setPromptDrafts] = useState({});
   const [busy, setBusy] = useState(false);
+  const [previewImage, setPreviewImage] = useState(null);
   const productFileRef = useRef(null);
   const modelFileRef = useRef(null);
   const fitFileRef = useRef(null);
@@ -808,7 +829,7 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
                   <strong>{step.title}</strong>
                   <em>{step.status}</em>
                 </div>
-                {step.url ? <img src={`${API}${step.url}`} alt={step.title} /> : <div className="step-placeholder">{step.error || "等待生成"}</div>}
+                {step.url ? <img src={`${API}${step.url}`} alt={step.title} className="clickable-img" onClick={() => setPreviewImage({ src: `${API}${step.url}`, alt: step.title })} /> : <div className="step-placeholder">{step.error || "等待生成"}</div>}
                 <textarea
                   value={promptDrafts[step.id] ?? step.prompt ?? ""}
                   onChange={(event) => setPromptDrafts({ ...promptDrafts, [step.id]: event.target.value })}
@@ -818,8 +839,8 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
                   {(step.reference_items || []).filter((item) => item.type === "rag").length ? (
                     (step.reference_items || []).filter((item) => item.type === "rag").map((item) => (
                       <div key={item.id} className="step-rag-ref-item">
-                        {item.url ? <img src={`${API}${item.url}`} alt={item.label} className="step-rag-thumb" /> : null}
-                        <div>
+                        {item.url ? <img src={`${API}${item.url}`} alt={item.label} className="step-rag-thumb clickable-img" onClick={() => setPreviewImage({ src: `${API}${item.url}`, alt: item.label })} /> : null}
+                        <div className="step-rag-ref-text">
                           <span>图{item.input_image_no} {item.label}</span>
                           {item.usage_labels?.length ? <small>用途：{item.usage_labels.join("、")}</small> : null}
                           {item.model_description ? <small>说明：{item.model_description}</small> : null}
@@ -846,6 +867,11 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
           </div>
         </div>
       ) : null}
+      <ImagePreviewModal
+        src={previewImage?.src}
+        alt={previewImage?.alt}
+        onClose={() => setPreviewImage(null)}
+      />
     </section>
   );
 }
