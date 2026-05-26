@@ -307,6 +307,7 @@ def init_db() -> None:
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 selected_at TEXT NOT NULL,
                 notes TEXT DEFAULT '',
+                model_description TEXT DEFAULT '',
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
 
@@ -345,3 +346,5 @@ def migrate_existing_db(conn: sqlite3.Connection) -> None:
     rag_columns = table_columns(conn, "rag_reference_selections")
     if rag_columns and "sort_order" not in rag_columns:
         conn.execute("ALTER TABLE rag_reference_selections ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
+    if rag_columns and "model_description" not in rag_columns:
+        conn.execute("ALTER TABLE rag_reference_selections ADD COLUMN model_description TEXT DEFAULT ''")

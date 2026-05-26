@@ -36,14 +36,22 @@ from .db import (
 )
 from .docx_workflow import STYLE_OPTIONS, build_workflow_steps, style_options_payload
 from .rag_integration import (
+    RAG_FORBIDDEN_ASPECTS,
     RAG_USAGE_TAGS,
+    allowed_aspects_for_usage_tags,
+    apply_rag_context_to_prompt,
+    build_default_model_description,
+    build_rag_summary,
     compact_rag_record,
+    compose_rag_context_block,
     download_rag_reference_to_cache,
     enrich_docx_steps_with_rag,
+    predicted_steps_for_usage_tags,
     rag_health,
     rag_image_response,
     rag_search,
     reference_ids_by_type,
+    strip_rag_context_block,
 )
 
 
@@ -117,6 +125,7 @@ class RagReferenceIn(BaseModel):
     score: float | None = None
     usage_tags: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
+    model_description: str = ""
     notes: str = ""
 
 
@@ -124,6 +133,7 @@ class RagReferenceUpdateIn(BaseModel):
     usage_tags: list[str] | None = None
     notes: str | None = None
     sort_order: int | None = None
+    model_description: str | None = None
 
 
 class KnowledgeCandidateIn(BaseModel):
@@ -294,16 +304,37 @@ def attach_docx_reference_items(conn, run: dict, steps: list[dict]) -> list[dict
                 )
             elif ref["type"] == "rag":
                 rag_ref = rag_by_id.get(ref["id"])
+                usage_tags = rag_ref.get("usage_tags") if rag_ref else []
+                usage_labels = rag_ref.get("usage_labels") if rag_ref else []
+                model_desc = rag_ref.get("model_description") if rag_ref else ""
+                allowed = allowed_aspects_for_usage_tags(usage_tags) if rag_ref else []
+                model_instruction = ""
+                if rag_ref:
+                    filename = rag_ref.get("filename") or rag_ref.get("rag_image_id") or "未知"
+                    instruction_parts = [f"图{index}：知识库参考图，文件名 {filename}"]
+                    if usage_labels:
+                        instruction_parts.append(f"用途：{'、'.join(usage_labels)}")
+                    instruction_parts.append(f"这张图是什么：{model_desc}")
+                    if allowed:
+                        instruction_parts.append(f"本图只参考：{'、'.join(allowed)}。")
+                    instruction_parts.append(f"不要参考：{'、'.join(RAG_FORBIDDEN_ASPECTS)}。")
+                    model_instruction = "\n".join(instruction_parts)
                 items.append(
                     {
                         "type": "rag",
                         "id": ref["id"],
                         "order": index,
+                        "input_image_no": index,
                         "label": rag_ref.get("filename") if rag_ref else "知识库参考图已删除",
                         "rag_image_id": rag_ref.get("rag_image_id") if rag_ref else "",
-                        "usage_tags": rag_ref.get("usage_tags") if rag_ref else [],
-                        "usage_labels": rag_ref.get("usage_labels") if rag_ref else [],
+                        "usage_tags": usage_tags,
+                        "usage_labels": usage_labels,
                         "url": rag_ref.get("image_url") if rag_ref else "",
+                        "model_description": model_desc,
+                        "rag_summary": rag_ref.get("rag_summary") if rag_ref else "",
+                        "allowed_aspects": allowed,
+                        "forbidden_aspects": list(RAG_FORBIDDEN_ASPECTS),
+                        "model_instruction": model_instruction,
                         "missing": not rag_ref,
                     }
                 )
@@ -409,7 +440,11 @@ def hydrate_rag_reference(row: dict | None) -> dict | None:
     row["usage_tags"] = row.pop("usage_tags", row.get("usage_tags_json", []))
     row["metadata"] = row.pop("metadata", row.get("metadata_json", {}))
     row["image_url"] = f"/api/rag/images/{row['rag_image_id']}"
-    row["usage_labels"] = [RAG_USAGE_TAGS.get(tag, tag) for tag in row.get("usage_tags") or []]
+    usage_tags = row.get("usage_tags") or []
+    row["usage_labels"] = [RAG_USAGE_TAGS.get(tag, tag) for tag in usage_tags]
+    row["model_description"] = build_default_model_description(row)
+    row["rag_summary"] = build_rag_summary(row)
+    row["applied_steps"] = predicted_steps_for_usage_tags(usage_tags)
     return row
 
 
@@ -578,8 +613,10 @@ def update_docx_workflow_step(step_id: str, payload: DocxWorkflowStepUpdateIn) -
             prompt = payload.prompt.strip()
             if not prompt:
                 raise HTTPException(400, "提示词不能为空")
+            # Strip RAG context block to store clean base prompt
+            clean_prompt = strip_rag_context_block(prompt)
             assignments.insert(0, "prompt = ?")
-            values.insert(0, prompt)
+            values.insert(0, clean_prompt)
         if payload.input_refs is not None:
             refs: list[dict[str, str]] = []
             for item in payload.input_refs:
@@ -623,6 +660,24 @@ def update_docx_workflow_step(step_id: str, payload: DocxWorkflowStepUpdateIn) -
             values.extend([to_json(refs), to_json(asset_ids), to_json(step_ids)])
         if payload.prompt is None and payload.input_refs is None:
             raise HTTPException(400, "没有可更新内容")
+        # Re-apply RAG context block when refs or prompt change
+        if payload.input_refs is not None or payload.prompt is not None:
+            final_refs = refs if payload.input_refs is not None else normalized_docx_refs(step)
+            rag_ids_in_refs = rag_ref_ids(final_refs)
+            if rag_ids_in_refs:
+                run = fetch_one(conn, "SELECT * FROM docx_workflow_runs WHERE id = ?", (step["run_id"],))
+                rag_refs_data = get_rag_references_by_ids(conn, run["project_id"], list(dict.fromkeys(rag_ids_in_refs)))
+                rag_by_id_map = {item["id"]: item for item in rag_refs_data}
+                base_prompt = strip_rag_context_block(
+                    (payload.prompt or "").strip() if payload.prompt is not None else (step["prompt"] or "")
+                )
+                enriched_prompt = apply_rag_context_to_prompt(base_prompt, final_refs, rag_by_id_map)
+                if "prompt = ?" not in assignments:
+                    assignments.insert(0, "prompt = ?")
+                    values.insert(0, enriched_prompt)
+                else:
+                    prompt_idx = assignments.index("prompt = ?")
+                    values[prompt_idx] = enriched_prompt
         values.append(step_id)
         conn.execute(
             f"UPDATE docx_workflow_steps SET {', '.join(assignments)} WHERE id = ?",
@@ -1028,7 +1083,7 @@ def add_project_rag_reference(project_id: str, payload: RagReferenceIn) -> dict:
                 """
                 UPDATE rag_reference_selections
                 SET filename = ?, category = ?, scene = ?, image_type = ?, caption = ?, score = ?,
-                    usage_tags_json = ?, metadata_json = ?, notes = ?
+                    usage_tags_json = ?, metadata_json = ?, notes = ?, model_description = ?
                 WHERE id = ?
                 """,
                 (
@@ -1041,6 +1096,7 @@ def add_project_rag_reference(project_id: str, payload: RagReferenceIn) -> dict:
                     to_json(usage_tags),
                     to_json(payload.metadata),
                     payload.notes,
+                    payload.model_description,
                     reference_id,
                 ),
             )
@@ -1054,8 +1110,8 @@ def add_project_rag_reference(project_id: str, payload: RagReferenceIn) -> dict:
                 """
                 INSERT INTO rag_reference_selections
                 (id, project_id, rag_image_id, filename, category, scene, image_type, caption, score,
-                 usage_tags_json, metadata_json, sort_order, selected_at, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 usage_tags_json, metadata_json, sort_order, selected_at, notes, model_description)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     reference_id,
@@ -1072,6 +1128,7 @@ def add_project_rag_reference(project_id: str, payload: RagReferenceIn) -> dict:
                     int(max_sort) + 1,
                     ts,
                     payload.notes,
+                    payload.model_description,
                 ),
             )
         return fetch_rag_reference(conn, project_id, reference_id)
@@ -1087,6 +1144,9 @@ def update_project_rag_reference(project_id: str, reference_id: str, payload: Ra
     if payload.notes is not None:
         assignments.append("notes = ?")
         values.append(payload.notes)
+    if payload.model_description is not None:
+        assignments.append("model_description = ?")
+        values.append(payload.model_description)
     if payload.sort_order is not None:
         assignments.append("sort_order = ?")
         values.append(int(payload.sort_order))

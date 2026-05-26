@@ -274,6 +274,14 @@ function RagKnowledgeWorkbench({ project, refreshProject }) {
     setReferences((items) => items.map((item) => (item.id === updated.id ? updated : item)));
   };
 
+  const updateModelDescription = async (reference, description) => {
+    const updated = await request(`/api/projects/${project.id}/rag-references/${reference.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ model_description: description }),
+    });
+    setReferences((items) => items.map((item) => (item.id === updated.id ? updated : item)));
+  };
+
   const removeReference = async (referenceId) => {
     if (!confirm("确认从本项目参考池移除这张知识库图片？")) return;
     await request(`/api/projects/${project.id}/rag-references/${referenceId}`, { method: "DELETE" });
@@ -355,6 +363,25 @@ function RagKnowledgeWorkbench({ project, refreshProject }) {
                     {label}
                   </label>
                 ))}
+              </div>
+              <label className="stacked-field rag-model-desc">
+                <span>这张图是什么（给模型看的说明）</span>
+                <textarea
+                  value={reference.model_description || ""}
+                  onChange={(event) => setReferences((items) => items.map((item) => item.id === reference.id ? { ...item, model_description: event.target.value } : item))}
+                  onBlur={(event) => updateModelDescription(reference, event.target.value)}
+                  rows={2}
+                />
+              </label>
+              <div className="rag-applied-steps">
+                <strong>预计用于：</strong>
+                {(reference.applied_steps || []).length ? (
+                  <span>
+                    {reference.applied_steps.map((s) => `第${s.image_no}张 ${s.title}`).join("、")}
+                  </span>
+                ) : (
+                  <span className="muted">未分配，请选择用途标签</span>
+                )}
               </div>
             </div>
             <button className="icon-btn danger" title="移除" onClick={() => removeReference(reference.id)}>
@@ -615,6 +642,23 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
     }
   };
 
+  const removeRagRefFromStep = async (step, ragRefId) => {
+    const currentRefs = step.input_refs || [];
+    const newRefs = currentRefs.filter((ref) => !(ref.type === "rag" && ref.id === ragRefId));
+    setBusy(true);
+    try {
+      const updated = await request(`/api/docx-workflow/steps/${step.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ input_refs: newRefs }),
+      });
+      setActiveRun((current) => current ? { ...current, steps: (current.steps || []).map((s) => s.id === step.id ? { ...s, ...updated } : s) } : current);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const markKnowledgeCandidate = async (step) => {
     if (!step?.id || !step.url) return;
     setBusy(true);
@@ -769,6 +813,26 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
                   value={promptDrafts[step.id] ?? step.prompt ?? ""}
                   onChange={(event) => setPromptDrafts({ ...promptDrafts, [step.id]: event.target.value })}
                 />
+                <div className="step-rag-refs">
+                  <strong>知识库参考：</strong>
+                  {(step.reference_items || []).filter((item) => item.type === "rag").length ? (
+                    (step.reference_items || []).filter((item) => item.type === "rag").map((item) => (
+                      <div key={item.id} className="step-rag-ref-item">
+                        {item.url ? <img src={`${API}${item.url}`} alt={item.label} className="step-rag-thumb" /> : null}
+                        <div>
+                          <span>图{item.input_image_no} {item.label}</span>
+                          {item.usage_labels?.length ? <small>用途：{item.usage_labels.join("、")}</small> : null}
+                          {item.model_description ? <small>说明：{item.model_description}</small> : null}
+                        </div>
+                        <button className="icon-btn danger" title="从本图移除" onClick={() => removeRagRefFromStep(step, item.id)}>
+                          <X size={12} />
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <span className="muted">无</span>
+                  )}
+                </div>
                 <div className="docx-actions">
                   <button onClick={() => savePrompt(step.id, promptDrafts[step.id] ?? step.prompt ?? "")}>保存提示词</button>
                   <button onClick={() => regenerateStep(step.id)} disabled={busy}>重新生成本张</button>
