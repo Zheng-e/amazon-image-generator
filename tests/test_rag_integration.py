@@ -2,6 +2,7 @@ from backend.app.rag_integration import (
     build_rag_summary,
     compact_rag_record,
     enrich_docx_steps_with_rag,
+    reference_ids_by_type,
     select_stage_references,
 )
 
@@ -92,3 +93,21 @@ def test_enrich_docx_steps_adds_prompt_summary_and_rag_refs():
     assert "知识库参考摘要" in enriched[0]["prompt"]
     assert "欧洲风格城市街道" in enriched[0]["prompt"]
     assert enriched[0]["input_refs"][-1] == {"type": "rag", "id": "ref1"}
+
+
+def test_reference_ids_by_type_includes_rag_ids():
+    refs = [
+        {"type": "asset", "id": "asset1"},
+        {"type": "step", "id": "model_on_body"},
+        {"type": "rag", "id": "rag1"},
+        {"type": "rag", "id": "rag2"},
+    ]
+
+    snapshot = reference_ids_by_type(refs)
+
+    assert snapshot == {
+        "reference_refs": refs,
+        "reference_asset_ids": ["asset1"],
+        "reference_stage_ids": ["model_on_body"],
+        "reference_rag_ids": ["rag1", "rag2"],
+    }

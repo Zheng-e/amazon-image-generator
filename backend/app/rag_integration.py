@@ -7,7 +7,15 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from fastapi import HTTPException
+
+try:
+    from fastapi import HTTPException
+except Exception:  # pragma: no cover - lets pure helper tests run without FastAPI installed.
+    class HTTPException(Exception):
+        def __init__(self, status_code: int, detail: str) -> None:
+            super().__init__(f"{status_code}: {detail}")
+            self.status_code = status_code
+            self.detail = detail
 
 
 RAG_USAGE_TAGS: dict[str, str] = {
@@ -126,6 +134,15 @@ def enrich_docx_steps_with_rag(steps: list[dict[str, Any]], references: list[dic
             updated["input_refs"] = refs
         enriched.append(updated)
     return enriched
+
+
+def reference_ids_by_type(refs: list[dict[str, str]]) -> dict[str, Any]:
+    return {
+        "reference_refs": refs,
+        "reference_asset_ids": [ref["id"] for ref in refs if ref.get("type") == "asset"],
+        "reference_stage_ids": [ref["id"] for ref in refs if ref.get("type") == "step"],
+        "reference_rag_ids": [ref["id"] for ref in refs if ref.get("type") == "rag"],
+    }
 
 
 def rag_request(method: str, path: str, **kwargs: Any) -> requests.Response:

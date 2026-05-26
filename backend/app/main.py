@@ -43,6 +43,7 @@ from .rag_integration import (
     rag_health,
     rag_image_response,
     rag_search,
+    reference_ids_by_type,
 )
 
 
@@ -676,19 +677,6 @@ def regenerate_docx_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn 
         missing_files = missing_asset_file_names(assets)
         if missing_files:
             raise HTTPException(400, "参考图文件不存在，请重新上传：" + "、".join(missing_files))
-        input_paths: list[Path] = []
-        for ref in refs:
-            if ref["type"] == "asset":
-                input_paths.append(Path(asset_by_id[ref["id"]]["file_path"]))
-            elif ref["type"] == "step":
-                source_step = step_by_stage.get(ref["id"])
-                source_path = Path(source_step.get("image_path") or "") if source_step else Path("")
-                if not source_step or not source_path.is_file():
-                    raise HTTPException(400, f"缺少前置步骤结果，请先生成：{ref['id']}")
-                input_paths.append(source_path)
-            elif ref["type"] == "rag":
-                rag_ref = fetch_rag_reference(conn, run["project_id"], ref["id"])
-                input_paths.append(download_rag_reference_to_cache(run["project_id"], rag_ref, UPLOAD_DIR))
         conn.execute(
             """
             UPDATE docx_workflow_steps
@@ -707,6 +695,20 @@ def regenerate_docx_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn 
     image_model = payload.image_model or run.get("image_model") or None
     image_response: dict[str, Any] = {}
     try:
+        input_paths: list[Path] = []
+        for ref in refs:
+            if ref["type"] == "asset":
+                input_paths.append(Path(asset_by_id[ref["id"]]["file_path"]))
+            elif ref["type"] == "step":
+                source_step = step_by_stage.get(ref["id"])
+                source_path = Path(source_step.get("image_path") or "") if source_step else Path("")
+                if not source_step or not source_path.is_file():
+                    raise HTTPException(400, f"缺少前置步骤结果，请先生成：{ref['id']}")
+                input_paths.append(source_path)
+            elif ref["type"] == "rag":
+                with get_db() as conn:
+                    rag_ref = fetch_rag_reference(conn, run["project_id"], ref["id"])
+                input_paths.append(download_rag_reference_to_cache(run["project_id"], rag_ref, UPLOAD_DIR))
         image_response = call_image_model(step["prompt"], input_paths, size=size, quality=quality, model=image_model)
         out_dir = UPLOAD_DIR / run["project_id"] / "docx_workflow" / run["id"]
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -717,10 +719,7 @@ def regenerate_docx_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn 
             "quality": quality,
             "image_model": image_response.get("model") or image_model or "",
             "image_api_type": image_response.get("api_type") or "",
-            "reference_refs": refs,
-            "reference_asset_ids": [ref["id"] for ref in refs if ref["type"] == "asset"],
-            "reference_stage_ids": [ref["id"] for ref in refs if ref["type"] == "step"],
-            "reference_rag_ids": [ref["id"] for ref in refs if ref["type"] == "rag"],
+            **reference_ids_by_type(refs),
             **(image_response.get("params") or {}),
         }
         with get_db() as conn:
@@ -749,9 +748,7 @@ def regenerate_docx_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn 
                             "size": size,
                             "quality": quality,
                             "image_model": image_response.get("model") or image_model or "",
-                            "reference_refs": refs,
-                            "reference_asset_ids": [ref["id"] for ref in refs if ref["type"] == "asset"],
-                            "reference_stage_ids": [ref["id"] for ref in refs if ref["type"] == "step"],
+                            **reference_ids_by_type(refs),
                         }
                     ),
                     "failed",
@@ -842,29 +839,23 @@ def generate_docx_workflow_run(run_id: str, payload: DocxWorkflowGenerateIn | No
     errors: list[str] = []
 
     def run_step(step: dict) -> tuple[bool, str, str, Path | None]:
-        input_paths: list[Path] = []
         refs = normalized_docx_refs(step)
-        for ref in refs:
-            if ref["type"] == "asset":
-                input_paths.append(Path(asset_by_id[ref["id"]]["file_path"]))
-            elif ref["type"] == "step":
-                stage_path = stage_output_paths.get(ref["id"])
-                if not stage_path:
-                    missing_dependency = f"缺少前置步骤结果: {ref['id']}"
-                    with get_db() as conn:
-                        conn.execute(
-                            "UPDATE docx_workflow_steps SET status = ?, error = ?, updated_at = ? WHERE id = ?",
-                            ("failed", missing_dependency, now_iso(), step["id"]),
-                        )
-                    return False, step["stage_id"], missing_dependency, None
-                input_paths.append(stage_path)
-            elif ref["type"] == "rag":
-                with get_db() as conn:
-                    rag_ref = fetch_rag_reference(conn, run["project_id"], ref["id"])
-                input_paths.append(download_rag_reference_to_cache(run["project_id"], rag_ref, UPLOAD_DIR))
-
         image_response: dict[str, Any] = {}
         try:
+            input_paths: list[Path] = []
+            for ref in refs:
+                if ref["type"] == "asset":
+                    input_paths.append(Path(asset_by_id[ref["id"]]["file_path"]))
+                elif ref["type"] == "step":
+                    stage_path = stage_output_paths.get(ref["id"])
+                    if not stage_path:
+                        raise RuntimeError(f"缺少前置步骤结果: {ref['id']}")
+                    input_paths.append(stage_path)
+                elif ref["type"] == "rag":
+                    with get_db() as conn:
+                        rag_ref = fetch_rag_reference(conn, run["project_id"], ref["id"])
+                    input_paths.append(download_rag_reference_to_cache(run["project_id"], rag_ref, UPLOAD_DIR))
+
             image_response = call_image_model(step["prompt"], input_paths, size=size, quality=quality, model=image_model)
             out_dir = UPLOAD_DIR / run["project_id"] / "docx_workflow" / run_id
             out_dir.mkdir(parents=True, exist_ok=True)
@@ -875,9 +866,7 @@ def generate_docx_workflow_run(run_id: str, payload: DocxWorkflowGenerateIn | No
                 "quality": quality,
                 "image_model": image_response.get("model") or image_model or "",
                 "image_api_type": image_response.get("api_type") or "",
-                "reference_refs": refs,
-                "reference_asset_ids": [ref["id"] for ref in refs if ref["type"] == "asset"],
-                "reference_stage_ids": [ref["id"] for ref in refs if ref["type"] == "step"],
+                **reference_ids_by_type(refs),
                 **(image_response.get("params") or {}),
             }
             with get_db() as conn:
@@ -905,9 +894,7 @@ def generate_docx_workflow_run(run_id: str, payload: DocxWorkflowGenerateIn | No
                                 "size": size,
                                 "quality": quality,
                                 "image_model": image_response.get("model") or image_model or "",
-                                "reference_refs": refs,
-                                "reference_asset_ids": [ref["id"] for ref in refs if ref["type"] == "asset"],
-                                "reference_stage_ids": [ref["id"] for ref in refs if ref["type"] == "step"],
+                                **reference_ids_by_type(refs),
                             }
                         ),
                         "failed",
