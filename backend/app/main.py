@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 import sys
 import threading
+import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -1121,6 +1122,108 @@ def _run_generation_in_background(
         _cleanup_task(run_id)
 
 
+def _run_project_workflow_in_background(project_id: str, image_model: str | None, size: str, quality: str) -> None:
+    def run_step(step_id: str) -> bool:
+        with get_db() as conn:
+            step = row_to_dict(conn.execute("SELECT * FROM project_workflow_steps WHERE id = ?", (step_id,)).fetchone())
+            project = row_to_dict(conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone())
+        if not step:
+            return False
+
+        prompt = step.get("prompt") or ""
+        if not prompt.strip():
+            with get_db() as conn:
+                conn.execute("UPDATE project_workflow_steps SET status = 'failed', error = '提示词为空', updated_at = ? WHERE id = ?", (now_iso(), step_id))
+            return False
+
+        input_paths: list[str] = []
+        refs = step.get("input_refs") or []
+        for ref in refs:
+            if ref.get("type") == "asset":
+                with get_db() as conn:
+                    asset = conn.execute("SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL", (ref["id"],)).fetchone()
+                if asset:
+                    asset = row_to_dict(asset)
+                    if asset.get("file_path") and Path(asset["file_path"]).is_file():
+                        input_paths.append(asset["file_path"])
+            elif ref.get("type") == "step":
+                src_path = stage_output_paths.get(ref["id"])
+                if src_path and Path(src_path).is_file():
+                    input_paths.append(src_path)
+            elif ref.get("type") == "rag":
+                with get_db() as conn:
+                    rag = conn.execute("SELECT * FROM rag_reference_selections WHERE id = ?", (ref["id"],)).fetchone()
+                if rag:
+                    rag = row_to_dict(rag)
+                    cache_path = Path(DATA_DIR) / "projects" / project_id / "rag_cache" / f"{rag['rag_image_id']}.jpg"
+                    if cache_path.is_file():
+                        input_paths.append(str(cache_path))
+
+        with get_db() as conn:
+            conn.execute("UPDATE project_workflow_steps SET status = 'running', error = '', updated_at = ? WHERE id = ?", (now_iso(), step_id))
+
+        retries = 3
+        last_error = ""
+        for attempt in range(retries):
+            try:
+                result = call_image_model(prompt=prompt, image_paths=[Path(p) for p in input_paths], model=image_model, size=size, quality=quality)
+                step_dir = Path(DATA_DIR) / "projects" / project_id / "docx_workflow" / "_project_steps"
+                step_dir.mkdir(parents=True, exist_ok=True)
+                stage_id = re.sub(r"[^A-Za-z0-9_-]+", "_", step.get("stage_id") or "image").strip("_")
+                filename = f"{int(step.get('image_no') or 0):02d}_{stage_id}.png"
+                out_path = step_dir / filename
+                with open(out_path, "wb") as f:
+                    f.write(result["image_bytes"])
+                params = {k: v for k, v in result.items() if k != "image_bytes"}
+                with get_db() as conn:
+                    conn.execute(
+                        "UPDATE project_workflow_steps SET status = 'success', image_path = ?, params_json = ?, error = '', updated_at = ? WHERE id = ?",
+                        (str(out_path), to_json(params), now_iso(), step_id),
+                    )
+                stage_output_paths[step["stage_id"]] = str(out_path)
+                return True
+            except Exception as exc:
+                last_error = str(exc)[:500]
+                if attempt < retries - 1:
+                    time.sleep(2 ** attempt)
+
+        with get_db() as conn:
+            conn.execute("UPDATE project_workflow_steps SET status = 'failed', error = ?, updated_at = ? WHERE id = ?", (last_error, now_iso(), step_id))
+        return False
+
+    stage_output_paths: dict[str, str] = {}
+
+    with get_db() as conn:
+        step_rows = conn.execute(
+            "SELECT id, stage_id, generation_order FROM project_workflow_steps WHERE project_id = ? ORDER BY generation_order ASC",
+            (project_id,),
+        ).fetchall()
+
+    steps_info = [{"id": r["id"], "stage_id": r["stage_id"], "order": r["generation_order"]} for r in step_rows]
+
+    for i in range(min(2, len(steps_info))):
+        success = run_step(steps_info[i]["id"])
+        if not success:
+            with get_db() as conn:
+                conn.execute("UPDATE projects SET workflow_status = 'failed', workflow_error = '步骤失败', updated_at = ? WHERE id = ?", (now_iso(), project_id))
+            return
+
+    parallel_steps = steps_info[2:]
+    if parallel_steps:
+        with ThreadPoolExecutor(max_workers=min(len(parallel_steps), 7)) as executor:
+            futures = {executor.submit(run_step, s["id"]): s for s in parallel_steps}
+            for future in as_completed(futures):
+                future.result()
+
+    with get_db() as conn:
+        update_project_workflow_status(conn, project_id)
+
+
+def _cleanup_project_task(project_id: str) -> None:
+    with _active_tasks_lock:
+        _active_tasks.pop(project_id, None)
+
+
 @app.post("/api/docx-workflow/runs/{run_id}/generate")
 def generate_docx_workflow_run(run_id: str, payload: DocxWorkflowGenerateIn | None = None) -> dict:
     payload = payload or DocxWorkflowGenerateIn()
@@ -1224,6 +1327,257 @@ def list_all_docx_runs(
         return results
 
 
+@app.post("/api/projects/{project_id}/workflow")
+def init_project_workflow(project_id: str, payload: DocxWorkflowRunIn) -> dict:
+    with get_db() as conn:
+        project = fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))
+        validated = validate_docx_workflow_input(conn, payload)
+        conn.execute(
+            """UPDATE projects SET
+               product_name = ?, material = ?, style_key = ?,
+               product_asset_id = ?, model_asset_id = ?, fit_asset_id = ?, scene_asset_id = ?,
+               image_model = ?, size = ?, quality = ?,
+               workflow_status = 'idle', workflow_error = '', updated_at = ?
+               WHERE id = ?""",
+            (
+                payload.product_name, payload.material, payload.style_key,
+                payload.product_asset_id, payload.model_asset_id,
+                payload.fit_asset_id, payload.scene_asset_id,
+                payload.image_model or "", payload.size, payload.quality,
+                now_iso(), project_id,
+            ),
+        )
+        conn.execute("DELETE FROM project_workflow_steps WHERE project_id = ?", (project_id,))
+        insert_project_workflow_steps(conn, project_id, payload)
+        return fetch_project_workflow_package(conn, project_id)
+
+
+@app.get("/api/projects/{project_id}/workflow")
+def get_project_workflow(project_id: str) -> dict:
+    with get_db() as conn:
+        return fetch_project_workflow_package(conn, project_id)
+
+
+@app.post("/api/projects/{project_id}/workflow/preview")
+def preview_project_workflow(project_id: str) -> dict:
+    with get_db() as conn:
+        return fetch_project_workflow_package(conn, project_id)
+
+
+@app.post("/api/projects/{project_id}/workflow/generate")
+def generate_project_workflow(project_id: str, payload: DocxWorkflowGenerateIn) -> dict:
+    with get_db() as conn:
+        project = fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))
+        steps = fetch_project_workflow_steps(conn, project_id)
+        if len(steps) != 9:
+            raise HTTPException(400, "工作流步骤不完整，需要 9 步")
+        if payload.image_model or payload.size or payload.quality:
+            conn.execute(
+                "UPDATE projects SET image_model = COALESCE(?, image_model), size = COALESCE(?, size), quality = COALESCE(?, quality), updated_at = ? WHERE id = ?",
+                (payload.image_model, payload.size, payload.quality, now_iso(), project_id),
+            )
+        conn.execute(
+            "UPDATE projects SET workflow_status = 'running', workflow_error = '', updated_at = ? WHERE id = ?",
+            (now_iso(), project_id),
+        )
+        conn.execute(
+            "UPDATE project_workflow_steps SET status = 'pending', error = '', image_path = '', params_json = '{}', updated_at = ? WHERE project_id = ?",
+            (now_iso(), project_id),
+        )
+
+    size = payload.size or project.get("size") or "1024x1024"
+    quality = payload.quality or project.get("quality") or "high"
+    image_model = payload.image_model or project.get("image_model") or None
+
+    thread = threading.Thread(
+        target=_run_project_workflow_in_background,
+        args=(project_id, image_model, size, quality),
+        daemon=True,
+    )
+    with _active_tasks_lock:
+        _active_tasks[project_id] = thread
+    thread.start()
+
+    with get_db() as conn:
+        return fetch_project_workflow_package(conn, project_id)
+
+
+@app.get("/api/projects/{project_id}/workflow/download")
+def download_project_workflow(project_id: str) -> Response:
+    with get_db() as conn:
+        package = fetch_project_workflow_package(conn, project_id)
+    steps = sorted(package.get("steps") or [], key=lambda item: item.get("generation_order") or item.get("image_no") or 0)
+    ready_steps = [step for step in steps if step.get("image_path") and Path(step["image_path"]).is_file()]
+    if len(ready_steps) < 9:
+        raise HTTPException(400, "还没有生成完整 9 张图，无法下载")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for step in ready_steps:
+            src = Path(step["image_path"])
+            stage_id = re.sub(r"[^A-Za-z0-9_-]+", "_", str(step.get("stage_id") or "image")).strip("_")
+            filename = f"{int(step.get('image_no') or 0):02d}_{stage_id}{src.suffix or '.png'}"
+            zf.write(src, filename)
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", str(package.get("product_name") or "docx_workflow")).strip("_") or "docx_workflow"
+    with get_db() as conn:
+        conn.execute("UPDATE projects SET downloaded_at = ? WHERE id = ?", (now_iso(), project_id))
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_{project_id[:8]}_images.zip"'},
+    )
+
+
+@app.patch("/api/projects/workflow/steps/{step_id}")
+def update_project_workflow_step(step_id: str, payload: DocxWorkflowStepUpdateIn) -> dict:
+    with get_db() as conn:
+        step = fetch_one(conn, "SELECT * FROM project_workflow_steps WHERE id = ?", (step_id,))
+        assignments = ["status = ?", "error = ?", "updated_at = ?"]
+        values: list[Any] = ["pending", "", now_iso()]
+        if payload.prompt is not None:
+            prompt = payload.prompt.strip()
+            if not prompt:
+                raise HTTPException(400, "提示词不能为空")
+            clean_prompt = strip_rag_context_block(prompt)
+            assignments.insert(0, "prompt = ?")
+            values.insert(0, clean_prompt)
+        if payload.input_refs is not None:
+            refs: list[dict[str, str]] = []
+            for item in payload.input_refs:
+                ref_type = (item.get("type") or "").strip()
+                ref_id = (item.get("id") or "").strip()
+                if ref_type not in ("asset", "step", "rag"):
+                    raise HTTPException(400, f"无效的引用类型: {ref_type}")
+                if not ref_id:
+                    raise HTTPException(400, "引用 ID 不能为空")
+                if ref_type == "asset":
+                    asset = fetch_one(conn, "SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL", (ref_id,))
+                    if asset["project_id"] != step["project_id"]:
+                        raise HTTPException(400, f"素材 {ref_id} 不属于当前项目")
+                elif ref_type == "step":
+                    src_step = fetch_one(conn, "SELECT * FROM project_workflow_steps WHERE id = ?", (ref_id,))
+                    if src_step["project_id"] != step["project_id"]:
+                        raise HTTPException(400, f"步骤 {ref_id} 不属于当前项目")
+                elif ref_type == "rag":
+                    rag_ref = fetch_one(conn, "SELECT * FROM rag_reference_selections WHERE id = ? AND project_id = ?", (ref_id, step["project_id"]))
+                refs.append({"type": ref_type, "id": ref_id})
+            assignments.insert(0, "input_refs_json = ?")
+            values.insert(0, to_json(refs))
+        values.append(step_id)
+        conn.execute(
+            f"UPDATE project_workflow_steps SET {', '.join(assignments)} WHERE id = ?",
+            tuple(values),
+        )
+        updated_step = row_to_dict(conn.execute("SELECT * FROM project_workflow_steps WHERE id = ?", (step_id,)).fetchone())
+        project_id = step["project_id"]
+        rag_refs = conn.execute(
+            "SELECT * FROM rag_reference_selections WHERE project_id = ? ORDER BY sort_order ASC, selected_at DESC",
+            (project_id,),
+        ).fetchall()
+        if rag_refs:
+            rag_by_id = {row_to_dict(r)["id"]: row_to_dict(r) for r in rag_refs}
+            base_prompt = strip_rag_context_block(updated_step.get("prompt") or "")
+            final_prompt = apply_rag_context_to_prompt(base_prompt, updated_step.get("input_refs") or [], rag_by_id)
+            conn.execute("UPDATE project_workflow_steps SET prompt = ?, updated_at = ? WHERE id = ?", (final_prompt, now_iso(), step_id))
+        return fetch_project_workflow_package(conn, project_id)
+
+
+@app.post("/api/projects/workflow/steps/{step_id}/generate")
+def generate_project_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn) -> dict:
+    with get_db() as conn:
+        step = fetch_one(conn, "SELECT * FROM project_workflow_steps WHERE id = ?", (step_id,))
+        project_id = step["project_id"]
+        project = fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))
+
+    input_paths: list[str] = []
+    refs = step.get("input_refs") or []
+    for ref in refs:
+        if ref.get("type") == "asset":
+            with get_db() as conn:
+                asset = conn.execute("SELECT * FROM assets WHERE id = ? AND deleted_at IS NULL", (ref["id"],)).fetchone()
+            if asset:
+                asset = row_to_dict(asset)
+                if asset.get("file_path") and Path(asset["file_path"]).is_file():
+                    input_paths.append(asset["file_path"])
+        elif ref.get("type") == "step":
+            with get_db() as conn:
+                src = conn.execute("SELECT * FROM project_workflow_steps WHERE id = ?", (ref["id"],)).fetchone()
+            if src:
+                src = row_to_dict(src)
+                if src.get("image_path") and Path(src["image_path"]).is_file():
+                    input_paths.append(src["image_path"])
+        elif ref.get("type") == "rag":
+            with get_db() as conn:
+                rag = conn.execute("SELECT * FROM rag_reference_selections WHERE id = ?", (ref["id"],)).fetchone()
+            if rag:
+                rag = row_to_dict(rag)
+                cache_path = Path(DATA_DIR) / "projects" / project_id / "rag_cache" / f"{rag['rag_image_id']}.jpg"
+                if cache_path.is_file():
+                    input_paths.append(str(cache_path))
+
+    prompt = step.get("prompt") or ""
+    if not prompt.strip():
+        raise HTTPException(400, "提示词为空，无法生成")
+
+    with get_db() as conn:
+        conn.execute("UPDATE project_workflow_steps SET status = 'running', error = '', updated_at = ? WHERE id = ?", (now_iso(), step_id))
+
+    size = payload.size or project.get("size") or "1024x1024"
+    quality = payload.quality or project.get("quality") or "high"
+    image_model = payload.image_model or project.get("image_model") or None
+
+    try:
+        result = call_image_model(prompt=prompt, image_paths=[Path(p) for p in input_paths], model=image_model, size=size, quality=quality)
+        step_dir = Path(DATA_DIR) / "projects" / project_id / "docx_workflow" / "_project_steps"
+        step_dir.mkdir(parents=True, exist_ok=True)
+        stage_id = re.sub(r"[^A-Za-z0-9_-]+", "_", step.get("stage_id") or "image").strip("_")
+        filename = f"{int(step.get('image_no') or 0):02d}_{stage_id}.png"
+        out_path = step_dir / filename
+        with open(out_path, "wb") as f:
+            f.write(result["image_bytes"])
+        params = {k: v for k, v in result.items() if k != "image_bytes"}
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE project_workflow_steps SET status = 'success', image_path = ?, params_json = ?, error = '', updated_at = ? WHERE id = ?",
+                (str(out_path), to_json(params), now_iso(), step_id),
+            )
+            update_project_workflow_status(conn, project_id)
+    except Exception as exc:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE project_workflow_steps SET status = 'failed', error = ?, updated_at = ? WHERE id = ?",
+                (str(exc)[:500], now_iso(), step_id),
+            )
+            update_project_workflow_status(conn, project_id)
+        raise HTTPException(500, f"图片生成失败: {exc}")
+
+    with get_db() as conn:
+        return fetch_project_workflow_package(conn, project_id)
+
+
+@app.post("/api/projects/workflow/steps/{step_id}/knowledge-candidate")
+def mark_project_step_knowledge_candidate(step_id: str, payload: KnowledgeCandidateIn) -> dict:
+    with get_db() as conn:
+        step = fetch_one(conn, "SELECT * FROM project_workflow_steps WHERE id = ?", (step_id,))
+        if step["status"] != "success" or not step.get("image_path"):
+            raise HTTPException(400, "只能标记已成功生成的步骤")
+        project_id = step["project_id"]
+        candidate_id = new_id()
+        conn.execute(
+            """INSERT INTO docx_knowledge_candidates
+               (id, project_id, run_id, step_id, image_path, rating, review_notes,
+                suggested_category, suggested_scene, suggested_image_type,
+                suggested_metadata_json, status, created_at, ingested_rag_image_id)
+               VALUES (?, ?, '', ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, '')""",
+            (
+                candidate_id, project_id, step_id, step["image_path"],
+                payload.rating, payload.review_notes,
+                payload.suggested_category, payload.suggested_scene, payload.suggested_image_type,
+                to_json(payload.suggested_metadata), now_iso(),
+            ),
+        )
+        return {"id": candidate_id, "status": "pending"}
+
+
 @app.get("/api/users")
 def list_users() -> list[dict]:
     with get_db() as conn:
@@ -1284,11 +1638,19 @@ def list_projects(
         results = []
         for row in rows:
             project = row_to_dict(row)
-            downloaded = conn.execute(
-                "SELECT COUNT(*) as cnt FROM docx_workflow_runs WHERE project_id = ? AND downloaded_at IS NOT NULL AND downloaded_at != ''",
+            step_rows = conn.execute(
+                "SELECT status FROM project_workflow_steps WHERE project_id = ?",
                 (project["id"],),
-            ).fetchone()
-            project["has_downloads"] = (downloaded["cnt"] if downloaded else 0) > 0
+            ).fetchall()
+            statuses = [s["status"] for s in step_rows]
+            project["step_summary"] = {
+                "total": len(statuses),
+                "success": statuses.count("success"),
+                "failed": statuses.count("failed"),
+                "running": statuses.count("running"),
+                "pending": statuses.count("pending"),
+            }
+            project["has_downloads"] = bool(project.get("downloaded_at"))
             results.append(project)
         return results
 
@@ -1323,6 +1685,11 @@ def get_project(project_id: str) -> dict:
         ).fetchall()
         project["assets"] = [hydrate_asset(row_to_dict(row)) for row in assets]
         project["docx_workflow_runs"] = [row_to_dict(row) for row in docx_runs]
+        workflow_steps = conn.execute(
+            "SELECT * FROM project_workflow_steps WHERE project_id = ? ORDER BY generation_order ASC",
+            (project_id,),
+        ).fetchall()
+        project["workflow_steps"] = [hydrate_docx_step(row_to_dict(row)) for row in workflow_steps]
         return project
 
 
