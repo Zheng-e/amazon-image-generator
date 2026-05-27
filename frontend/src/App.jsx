@@ -5,6 +5,7 @@ import {
   FlaskConical,
   ImagePlus,
   Plus,
+  RefreshCw,
   Save,
   Search,
   Sparkles,
@@ -73,6 +74,10 @@ async function request(path, options = {}) {
 
 function ProjectPanel({ projects, selectedProject, setSelectedProject, onCreate, onDelete }) {
   const [form, setForm] = useState({ sku: "", category: "", name: "", notes: "" });
+  const [search, setSearch] = useState("");
+  const filtered = search.trim()
+    ? projects.filter((p) => (p.sku || "").toLowerCase().includes(search.trim().toLowerCase()))
+    : projects;
   return (
     <section className="panel compact">
       <div className="section-title">
@@ -89,13 +94,22 @@ function ProjectPanel({ projects, selectedProject, setSelectedProject, onCreate,
         <Plus size={16} />
         创建项目
       </button>
+      <div className="project-search">
+        <Search size={14} />
+        <input placeholder="搜索 SKU…" value={search} onChange={(e) => setSearch(e.target.value)} />
+      </div>
       <div className="project-list">
-        {projects.map((project) => (
+        {filtered.map((project) => (
           <div key={project.id} className={selectedProject?.id === project.id ? "project-row active" : "project-row"}>
             <button className="project" onClick={() => setSelectedProject(project)}>
               <strong>{project.sku}</strong>
               <span>{project.name}</span>
             </button>
+            {project.has_downloads ? (
+              <span className="project-done" title="已下载">
+                <Check size={14} />
+              </span>
+            ) : null}
             <button className="icon-btn danger" title="删除项目" onClick={(e) => { e.stopPropagation(); onDelete(project.id); }}>
               <Trash2 size={14} />
             </button>
@@ -463,7 +477,7 @@ function DocxAssetSelect({ label, assets, slotHint, value, onChange }) {
   );
 }
 
-function DocxWorkflowPanel({ project, assets, runs, refresh }) {
+function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
   const [styles, setStyles] = useState([]);
   const [imageModels, setImageModels] = useState([]);
   const [form, setForm] = useState({
@@ -510,6 +524,23 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
     });
     setPromptDrafts(drafts);
   }, [activeRun]);
+
+  useEffect(() => {
+    if (!activeRun || activeRun.status !== "running") return;
+    const interval = setInterval(async () => {
+      try {
+        const updated = await request(`/api/docx-workflow/runs/${activeRun.id}`);
+        setActiveRun(updated);
+        if (updated.status !== "running") {
+          clearInterval(interval);
+          await refresh();
+        }
+      } catch (err) {
+        console.warn("Auto-refresh failed", err);
+      }
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [activeRun?.id, activeRun?.status]);
 
   const ready =
     form.product_name.trim() &&
@@ -598,24 +629,14 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
     try {
       const run = activeRun || (await createRun());
       if (activeRun) await saveAllPrompts();
-      setActiveRun(await request(`/api/docx-workflow/runs/${run.id}`));
-      const generatePromise = request(`/api/docx-workflow/runs/${run.id}/generate`, {
+      await request(`/api/docx-workflow/runs/${run.id}/generate`, {
         method: "POST",
         body: JSON.stringify({ image_model: form.image_model, size: form.size, quality: form.quality }),
       });
-      let finished = false;
-      generatePromise.then(() => { finished = true; }, () => { finished = true; });
-      while (!finished) {
-        await sleep(2500);
-        try {
-          setActiveRun(await request(`/api/docx-workflow/runs/${run.id}`));
-        } catch (err) {
-          console.warn("DOCX run poll failed", err);
-        }
-      }
-      const generated = await generatePromise;
-      setActiveRun(generated);
+      setActiveRun(await request(`/api/docx-workflow/runs/${run.id}`));
       await refresh();
+    } catch (err) {
+      alert(err.message);
     } finally {
       setBusy(false);
     }
@@ -637,6 +658,7 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
       a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
+      onDownload?.();
     } finally {
       setBusy(false);
     }
@@ -809,9 +831,13 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
       </div>
       <div className="run-list docx-run-list">
         {(runs || []).map((run) => (
-          <button key={run.id} onClick={() => loadRun(run.id)}>
+          <button key={run.id} className={`docx-run-item ${run.status}`} onClick={() => loadRun(run.id)}>
             <strong>{run.product_name}</strong>
-            <span>{run.status} · {run.created_at}</span>
+            <span className={`run-status-badge ${run.status}`}>
+              {run.status === "running" ? "生成中..." : run.status === "success" ? "已完成" : run.status === "failed" ? "失败" : run.status === "partial" ? "部分完成" : run.status}
+            </span>
+            <small>{run.created_at}</small>
+            {run.error ? <small className="run-error">{run.error}</small> : null}
           </button>
         ))}
       </div>
@@ -834,6 +860,20 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
                   value={promptDrafts[step.id] ?? step.prompt ?? ""}
                   onChange={(event) => setPromptDrafts({ ...promptDrafts, [step.id]: event.target.value })}
                 />
+                {(step.reference_items || []).filter((item) => item.type !== "rag").length ? (
+                  <div className="step-base-refs">
+                    <strong>基础参考：</strong>
+                    {(step.reference_items || []).filter((item) => item.type !== "rag").map((item) => (
+                      <div key={item.id} className="step-base-ref-item">
+                        {item.url ? <img src={`${API}${item.url}`} alt={item.label} className="step-base-ref-thumb clickable-img" onClick={() => setPreviewImage({ src: `${API}${item.url}`, alt: item.label })} /> : null}
+                        <div className="step-base-ref-text">
+                          <span>图{item.order} {item.label}</span>
+                          <small>{item.type === "step" ? `前置步骤 · ${item.status || "待生成"}` : item.slot || item.asset_type || ""}</small>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="step-rag-refs">
                   <strong>知识库参考：</strong>
                   {(step.reference_items || []).filter((item) => item.type === "rag").length ? (
@@ -876,57 +916,227 @@ function DocxWorkflowPanel({ project, assets, runs, refresh }) {
   );
 }
 
+function UserSelectScreen({ users, onSelect, onCreate }) {
+  const [name, setName] = useState("");
+  return (
+    <div className="centered-screen">
+      <div className="centered-card">
+        <h1>选择用户</h1>
+        <p>请选择一个用户，或创建新用户来管理项目。</p>
+        <div className="user-create-row">
+          <input
+            placeholder="输入新用户名"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && name.trim()) { onCreate(name.trim()); setName(""); } }}
+          />
+          <button
+            className="primary"
+            disabled={!name.trim()}
+            onClick={() => { onCreate(name.trim()); setName(""); }}
+          >
+            <Plus size={16} />
+            创建用户
+          </button>
+        </div>
+        <div className="user-list">
+          {users.map((user) => (
+            <button
+              key={user.id}
+              className="user-card"
+              onClick={() => onSelect(user)}
+            >
+              <strong>{user.name}</strong>
+              <small>{user.created_at}</small>
+            </button>
+          ))}
+          {users.length === 0 && (
+            <p className="muted">还没有用户，请先创建一个。</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectSelectScreen({ user, projects, onSelect, onCreate, onDelete, onBack }) {
+  const [form, setForm] = useState({ sku: "", category: "", name: "", notes: "" });
+  const handleCreate = () => {
+    if (!form.sku.trim()) return;
+    onCreate(form);
+    setForm({ sku: "", category: "", name: "", notes: "" });
+  };
+  return (
+    <div className="centered-screen">
+      <div className="centered-card wide-card">
+        <div className="centered-card-header">
+          <button className="ghost" onClick={onBack}>← 返回</button>
+          <h1>{user.name} 的项目</h1>
+        </div>
+        <div className="project-create-form">
+          <div className="project-create-row">
+            <input placeholder="SKU（必填）" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
+            <input placeholder="品类" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+          </div>
+          <input placeholder="项目名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+          <textarea placeholder="备注" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
+          <button className="primary" disabled={!form.sku.trim()} onClick={handleCreate}>
+            <Plus size={16} />
+            创建项目
+          </button>
+        </div>
+        <div className="project-select-list">
+          {projects.map((project) => (
+            <div key={project.id} className="project-select-card-wrap">
+              <button
+                className="project-select-card"
+                onClick={() => onSelect(project)}
+              >
+                <strong>{project.sku}</strong>
+                <span>{project.name}</span>
+                <small>{project.category || "未分类"}</small>
+              </button>
+              <button className="icon-btn danger project-delete-btn" title="删除项目" onClick={() => onDelete(project.id)}>
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+          {projects.length === 0 && (
+            <p className="muted">该用户还没有项目，请先创建一个。</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const [users, setUsers] = useState([]);
+  const [selectedUser, setSelectedUser] = useState(null);
+  const [phase, setPhase] = useState("user");
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [projectDetail, setProjectDetail] = useState(null);
   const [error, setError] = useState("");
 
-  const load = async () => {
+  const loadUsers = async () => {
     try {
       setError("");
-      const projectList = await request("/api/projects");
+      const data = await request("/api/users");
+      setUsers(data);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const loadProjects = async (userId) => {
+    if (!userId) return;
+    try {
+      setError("");
+      const projectList = await request(`/api/projects?user_id=${userId}`);
       setProjects(projectList);
-      if (selectedProject) {
-        setProjectDetail(await request(`/api/projects/${selectedProject.id}`));
-      }
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const loadProjectDetail = async () => {
+    if (!selectedProject) return;
+    try {
+      setProjectDetail(await request(`/api/projects/${selectedProject.id}`));
     } catch (err) {
       setError(err.message);
     }
   };
 
   useEffect(() => {
-    load();
+    loadUsers();
   }, []);
 
   useEffect(() => {
-    if (!selectedProject) return;
-    request(`/api/projects/${selectedProject.id}`).then(setProjectDetail).catch((err) => setError(err.message));
+    if (selectedUser) {
+      loadProjects(selectedUser.id);
+    }
+  }, [selectedUser]);
+
+  useEffect(() => {
+    loadProjectDetail();
   }, [selectedProject]);
 
   const createProject = async (form) => {
-    const project = await request("/api/projects", { method: "POST", body: JSON.stringify(form) });
+    const project = await request("/api/projects", { method: "POST", body: JSON.stringify({ ...form, user_id: selectedUser.id }) });
     setSelectedProject(project);
-    await load();
+    setPhase("workspace");
+    await loadProjects(selectedUser.id);
   };
   const deleteProject = async (id) => {
     if (!confirm("确认删除该项目？所有相关素材和记录都会被删除。")) return;
     await request(`/api/projects/${id}`, { method: "DELETE" });
     if (selectedProject?.id === id) setSelectedProject(null);
-    await load();
+    await loadProjects(selectedUser.id);
   };
 
   const assets = projectDetail?.assets || [];
   const docxRuns = projectDetail?.docx_workflow_runs || [];
+
+  if (phase === "user") {
+    return (
+      <div className="app-shell">
+        <header>
+          <div>
+            <h1>DOCX 固定九图自动化生图流程</h1>
+            <p>请先选择或创建一个用户。</p>
+          </div>
+        </header>
+        {error ? <div className="error-banner">{error}</div> : null}
+        <UserSelectScreen
+          users={users}
+          onSelect={(user) => { setSelectedUser(user); setPhase("project"); }}
+          onCreate={async (name) => {
+            const user = await request("/api/users", { method: "POST", body: JSON.stringify({ name }) });
+            setUsers((prev) => [user, ...prev]);
+            setSelectedUser(user);
+            setPhase("project");
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (phase === "project") {
+    return (
+      <div className="app-shell">
+        <header>
+          <div>
+            <h1>DOCX 固定九图自动化生图流程</h1>
+            <p>当前用户：{selectedUser?.name}。选择或创建一个项目。</p>
+          </div>
+        </header>
+        {error ? <div className="error-banner">{error}</div> : null}
+        <ProjectSelectScreen
+          user={selectedUser}
+          projects={projects}
+          onSelect={(project) => { setSelectedProject(project); setPhase("workspace"); }}
+          onCreate={createProject}
+          onDelete={deleteProject}
+          onBack={() => { setSelectedUser(null); setSelectedProject(null); setProjectDetail(null); setPhase("user"); }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="app-shell">
       <header>
         <div>
           <h1>DOCX 固定九图自动化生图流程</h1>
-          <p>上传产品图、模特参考图、上身效果参考图和场景风格参考图，按固定流程生成 9 张商品图。</p>
+          <p>{selectedUser?.name} / {selectedProject?.name || selectedProject?.sku}</p>
         </div>
-        <div className="status-pill">{selectedProject ? selectedProject.sku : "未选择项目"}</div>
+        <div className="header-right">
+          <div className="status-pill">{selectedProject ? selectedProject.sku : "未选择项目"}</div>
+          <button className="ghost" onClick={() => { setPhase("project"); loadProjects(selectedUser.id); }}>切换项目</button>
+          <button className="ghost" onClick={() => { setSelectedUser(null); setSelectedProject(null); setProjectDetail(null); setPhase("user"); }}>切换用户</button>
+        </div>
       </header>
       {error ? <div className="error-banner">{error}</div> : null}
       <main>
@@ -938,10 +1148,10 @@ export default function App() {
             <>
               <AssetPanel project={selectedProject} assets={assets} refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
               <RagKnowledgeWorkbench project={selectedProject} refreshProject={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
-              <DocxWorkflowPanel project={selectedProject} assets={assets} runs={docxRuns} refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
+              <DocxWorkflowPanel project={selectedProject} assets={assets} runs={docxRuns} refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} onDownload={() => loadProjects(selectedUser.id)} />
             </>
           ) : (
-            <section className="empty-state">先创建或选择一个项目。</section>
+            <section className="empty-state">请从左侧选择一个项目。</section>
           )}
         </div>
       </main>

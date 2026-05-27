@@ -6,6 +6,7 @@ import json
 import re
 import shutil
 import sys
+import threading
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -65,10 +66,19 @@ app.add_middleware(
 )
 
 
+_active_tasks: dict[str, threading.Thread] = {}
+_active_tasks_lock = threading.Lock()
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
     DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE docx_workflow_runs SET status = ?, error = ?, updated_at = ? WHERE status = ?",
+            ("failed", "服务器重启，任务中断", now_iso(), "running"),
+        )
 
 
 app.mount("/files", StaticFiles(directory=str(DATA_DIR)), name="files")
@@ -77,7 +87,12 @@ if STATIC_DIR.exists():
     app.mount("/workbench", StaticFiles(directory=str(STATIC_DIR), html=True), name="workbench")
 
 
+class UserIn(BaseModel):
+    name: str
+
+
 class ProjectIn(BaseModel):
+    user_id: str = "default"
     sku: str
     category: str = ""
     name: str = ""
@@ -596,6 +611,8 @@ def download_docx_workflow_run(run_id: str) -> Response:
             filename = f"{int(step.get('image_no') or 0):02d}_{stage_id}{src.suffix or '.png'}"
             zf.write(src, filename)
     safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", str(package.get("product_name") or "docx_workflow")).strip("_") or "docx_workflow"
+    with get_db() as conn:
+        conn.execute("UPDATE docx_workflow_runs SET downloaded_at = ? WHERE id = ?", (now_iso(), run_id))
     return Response(
         content=buffer.getvalue(),
         media_type="application/zip",
@@ -853,6 +870,150 @@ def create_docx_knowledge_candidate(step_id: str, payload: KnowledgeCandidateIn)
         return row_to_dict(conn.execute("SELECT * FROM docx_knowledge_candidates WHERE id = ?", (candidate_id,)).fetchone())
 
 
+def _cleanup_task(run_id: str) -> None:
+    with _active_tasks_lock:
+        _active_tasks.pop(run_id, None)
+
+
+def _run_generation_in_background(
+    run_id: str,
+    image_model: str | None,
+    size: str,
+    quality: str,
+) -> None:
+    try:
+        with get_db() as conn:
+            run = fetch_one(conn, "SELECT * FROM docx_workflow_runs WHERE id = ?", (run_id,))
+            steps = fetch_docx_steps(conn, run_id)
+            asset_ids = []
+            for step in steps:
+                for ref in normalized_docx_refs(step):
+                    if ref["type"] == "asset":
+                        asset_ids.append(ref["id"])
+            assets = get_assets_by_ids(conn, list(dict.fromkeys(asset_ids)))
+            asset_by_id = {asset["id"]: asset for asset in assets}
+
+        project_id = run["project_id"]
+        stage_output_paths: dict[str, Path] = {}
+        errors: list[str] = []
+
+        def run_step(step: dict) -> tuple[bool, str, str, Path | None]:
+            refs = normalized_docx_refs(step)
+            image_response: dict[str, Any] = {}
+            try:
+                input_paths: list[Path] = []
+                for ref in refs:
+                    if ref["type"] == "asset":
+                        input_paths.append(Path(asset_by_id[ref["id"]]["file_path"]))
+                    elif ref["type"] == "step":
+                        stage_path = stage_output_paths.get(ref["id"])
+                        if not stage_path:
+                            raise RuntimeError(f"缺少前置步骤结果: {ref['id']}")
+                        input_paths.append(stage_path)
+                    elif ref["type"] == "rag":
+                        with get_db() as conn:
+                            rag_ref = fetch_rag_reference(conn, project_id, ref["id"])
+                        input_paths.append(download_rag_reference_to_cache(project_id, rag_ref, UPLOAD_DIR))
+
+                image_response = call_image_model(step["prompt"], input_paths, size=size, quality=quality, model=image_model)
+                out_dir = UPLOAD_DIR / project_id / "docx_workflow" / run_id
+                out_dir.mkdir(parents=True, exist_ok=True)
+                image_path = out_dir / f"{step['generation_order']:02d}_{step['stage_id']}_{new_id()}.png"
+                image_path.write_bytes(base64.b64decode(image_response["b64_json"]))
+                params = {
+                    "size": size,
+                    "quality": quality,
+                    "image_model": image_response.get("model") or image_model or "",
+                    "image_api_type": image_response.get("api_type") or "",
+                    **reference_ids_by_type(refs),
+                    **(image_response.get("params") or {}),
+                }
+                with get_db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE docx_workflow_steps
+                        SET image_path = ?, params_json = ?, status = ?, error = ?, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (str(image_path), to_json(params), "success", "", now_iso(), step["id"]),
+                    )
+                return True, step["stage_id"], "", image_path
+            except Exception as exc:
+                error = str(exc)
+                with get_db() as conn:
+                    conn.execute(
+                        """
+                        UPDATE docx_workflow_steps
+                        SET params_json = ?, status = ?, error = ?, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            to_json(
+                                {
+                                    "size": size,
+                                    "quality": quality,
+                                    "image_model": image_response.get("model") or image_model or "",
+                                    **reference_ids_by_type(refs),
+                                }
+                            ),
+                            "failed",
+                            error,
+                            now_iso(),
+                            step["id"],
+                        ),
+                    )
+                return False, step["stage_id"], error, None
+
+        first_step = steps[0]
+        ok, stage_id, error, image_path = run_step(first_step)
+        if ok and image_path:
+            stage_output_paths[stage_id] = image_path
+        else:
+            errors.append(f"{first_step['title']}: {error}")
+
+        if not errors:
+            second_step = steps[1]
+            ok, stage_id, error, image_path = run_step(second_step)
+            if ok and image_path:
+                stage_output_paths[stage_id] = image_path
+            else:
+                errors.append(f"{second_step['title']}: {error}")
+
+        if not errors:
+            parallel_steps = steps[2:]
+            with ThreadPoolExecutor(max_workers=min(len(parallel_steps), 7)) as pool:
+                futures = {pool.submit(run_step, step): step for step in parallel_steps}
+                for future in as_completed(futures):
+                    step = futures[future]
+                    ok, stage_id, error, image_path = future.result()
+                    if ok and image_path:
+                        stage_output_paths[stage_id] = image_path
+                    else:
+                        errors.append(f"{step['title']}: {error}")
+
+        with get_db() as conn:
+            first_error = "；".join(errors[:3])
+            conn.execute(
+                """
+                UPDATE docx_workflow_runs
+                SET status = ?, error = ?, image_model = ?, size = ?, quality = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                ("success" if not errors else "failed", first_error, image_model or "", size, quality, now_iso(), run_id),
+            )
+    except Exception as exc:
+        try:
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE docx_workflow_runs SET status = ?, error = ?, updated_at = ? WHERE id = ?",
+                    ("failed", f"后台任务异常: {exc}", now_iso(), run_id),
+                )
+        except Exception:
+            pass
+    finally:
+        _cleanup_task(run_id)
+
+
 @app.post("/api/docx-workflow/runs/{run_id}/generate")
 def generate_docx_workflow_run(run_id: str, payload: DocxWorkflowGenerateIn | None = None) -> dict:
     payload = payload or DocxWorkflowGenerateIn()
@@ -874,6 +1035,12 @@ def generate_docx_workflow_run(run_id: str, payload: DocxWorkflowGenerateIn | No
         missing_files = missing_asset_file_names(assets)
         if missing_files:
             raise HTTPException(400, "参考图文件不存在，请重新上传：" + "、".join(missing_files))
+
+    with _active_tasks_lock:
+        if run_id in _active_tasks:
+            raise HTTPException(409, "该任务正在运行中，请等待完成")
+
+    with get_db() as conn:
         conn.execute(
             "UPDATE docx_workflow_runs SET status = ?, error = ?, updated_at = ? WHERE id = ?",
             ("running", "", now_iso(), run_id),
@@ -890,139 +1057,133 @@ def generate_docx_workflow_run(run_id: str, payload: DocxWorkflowGenerateIn | No
     size = payload.size or run.get("size") or "1024x1024"
     quality = payload.quality or run.get("quality") or "high"
     image_model = payload.image_model or run.get("image_model") or None
-    stage_output_paths: dict[str, Path] = {}
-    errors: list[str] = []
 
-    def run_step(step: dict) -> tuple[bool, str, str, Path | None]:
-        refs = normalized_docx_refs(step)
-        image_response: dict[str, Any] = {}
-        try:
-            input_paths: list[Path] = []
-            for ref in refs:
-                if ref["type"] == "asset":
-                    input_paths.append(Path(asset_by_id[ref["id"]]["file_path"]))
-                elif ref["type"] == "step":
-                    stage_path = stage_output_paths.get(ref["id"])
-                    if not stage_path:
-                        raise RuntimeError(f"缺少前置步骤结果: {ref['id']}")
-                    input_paths.append(stage_path)
-                elif ref["type"] == "rag":
-                    with get_db() as conn:
-                        rag_ref = fetch_rag_reference(conn, run["project_id"], ref["id"])
-                    input_paths.append(download_rag_reference_to_cache(run["project_id"], rag_ref, UPLOAD_DIR))
-
-            image_response = call_image_model(step["prompt"], input_paths, size=size, quality=quality, model=image_model)
-            out_dir = UPLOAD_DIR / run["project_id"] / "docx_workflow" / run_id
-            out_dir.mkdir(parents=True, exist_ok=True)
-            image_path = out_dir / f"{step['generation_order']:02d}_{step['stage_id']}_{new_id()}.png"
-            image_path.write_bytes(base64.b64decode(image_response["b64_json"]))
-            params = {
-                "size": size,
-                "quality": quality,
-                "image_model": image_response.get("model") or image_model or "",
-                "image_api_type": image_response.get("api_type") or "",
-                **reference_ids_by_type(refs),
-                **(image_response.get("params") or {}),
-            }
-            with get_db() as conn:
-                conn.execute(
-                    """
-                    UPDATE docx_workflow_steps
-                    SET image_path = ?, params_json = ?, status = ?, error = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (str(image_path), to_json(params), "success", "", now_iso(), step["id"]),
-                )
-            return True, step["stage_id"], "", image_path
-        except Exception as exc:
-            error = str(exc)
-            with get_db() as conn:
-                conn.execute(
-                    """
-                    UPDATE docx_workflow_steps
-                    SET params_json = ?, status = ?, error = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (
-                        to_json(
-                            {
-                                "size": size,
-                                "quality": quality,
-                                "image_model": image_response.get("model") or image_model or "",
-                                **reference_ids_by_type(refs),
-                            }
-                        ),
-                        "failed",
-                        error,
-                        now_iso(),
-                        step["id"],
-                    ),
-                )
-            return False, step["stage_id"], error, None
-
-    first_step = steps[0]
-    ok, stage_id, error, image_path = run_step(first_step)
-    if ok and image_path:
-        stage_output_paths[stage_id] = image_path
-    else:
-        errors.append(f"{first_step['title']}: {error}")
-
-    if not errors:
-        second_step = steps[1]
-        ok, stage_id, error, image_path = run_step(second_step)
-        if ok and image_path:
-            stage_output_paths[stage_id] = image_path
-        else:
-            errors.append(f"{second_step['title']}: {error}")
-
-    if not errors:
-        parallel_steps = steps[2:]
-        with ThreadPoolExecutor(max_workers=min(len(parallel_steps), 7)) as pool:
-            futures = {pool.submit(run_step, step): step for step in parallel_steps}
-            for future in as_completed(futures):
-                step = futures[future]
-                ok, stage_id, error, image_path = future.result()
-                if ok and image_path:
-                    stage_output_paths[stage_id] = image_path
-                else:
-                    errors.append(f"{step['title']}: {error}")
+    thread = threading.Thread(
+        target=_run_generation_in_background,
+        args=(run_id, image_model, size, quality),
+        daemon=True,
+    )
+    with _active_tasks_lock:
+        _active_tasks[run_id] = thread
+    thread.start()
 
     with get_db() as conn:
-        first_error = "；".join(errors[:3])
-        conn.execute(
-            """
-            UPDATE docx_workflow_runs
-            SET status = ?, error = ?, image_model = ?, size = ?, quality = ?, updated_at = ?
-            WHERE id = ?
-            """,
-            ("success" if not errors else "failed", first_error, image_model or "", size, quality, now_iso(), run_id),
-        )
         return fetch_docx_run_package(conn, run_id)
+
+
+@app.get("/api/docx-workflow/all-runs")
+def list_all_docx_runs(
+    user_id: str = Query("", description="Filter by user"),
+    status: str = Query("", description="Filter by status"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> list[dict]:
+    with get_db() as conn:
+        conditions: list[str] = []
+        params: list[Any] = []
+        if user_id.strip():
+            conditions.append("p.user_id = ?")
+            params.append(user_id.strip())
+        if status.strip():
+            conditions.append("r.status = ?")
+            params.append(status.strip())
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.extend([limit, offset])
+        rows = conn.execute(
+            f"""SELECT r.*, p.sku, p.name as project_name, p.user_id
+                FROM docx_workflow_runs r
+                JOIN projects p ON r.project_id = p.id
+                {where}
+                ORDER BY r.updated_at DESC
+                LIMIT ? OFFSET ?""",
+            tuple(params),
+        ).fetchall()
+        results: list[dict] = []
+        for row in rows:
+            run = row_to_dict(row)
+            step_rows = conn.execute(
+                "SELECT status FROM docx_workflow_steps WHERE run_id = ?",
+                (run["id"],),
+            ).fetchall()
+            statuses = [s["status"] for s in step_rows]
+            run["step_summary"] = {
+                "total": len(statuses),
+                "success": statuses.count("success"),
+                "failed": statuses.count("failed"),
+                "running": statuses.count("running"),
+                "pending": statuses.count("pending"),
+            }
+            results.append(run)
+        return results
+
+
+@app.get("/api/users")
+def list_users() -> list[dict]:
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM users ORDER BY created_at DESC").fetchall()
+        return [dict(row) for row in rows]
+
+
+@app.post("/api/users")
+def create_user(payload: UserIn) -> dict:
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(400, "用户名不能为空")
+    with get_db() as conn:
+        user_id = new_id()
+        ts = now_iso()
+        conn.execute(
+            "INSERT INTO users (id, name, created_at) VALUES (?, ?, ?)",
+            (user_id, name, ts),
+        )
+        return dict(conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+
+
+@app.delete("/api/users/{user_id}")
+def delete_user(user_id: str) -> dict:
+    if user_id == "default":
+        raise HTTPException(400, "不能删除默认用户")
+    with get_db() as conn:
+        user = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not user:
+            raise HTTPException(404, "用户不存在")
+        conn.execute("UPDATE projects SET user_id = 'default' WHERE user_id = ?", (user_id,))
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        return {"ok": True}
 
 
 @app.get("/api/projects")
 def list_projects(
     sku: str = Query("", description="SKU fuzzy search"),
+    user_id: str = Query("", description="Filter by user"),
     limit: int = Query(20, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> list[dict]:
     with get_db() as conn:
+        conditions: list[str] = []
+        params: list[Any] = []
+        if user_id.strip():
+            conditions.append("user_id = ?")
+            params.append(user_id.strip())
         if sku.strip():
-            rows = conn.execute(
-                """
-                SELECT * FROM projects
-                WHERE sku LIKE ?
-                ORDER BY updated_at DESC
-                LIMIT ? OFFSET ?
-                """,
-                (f"%{sku.strip()}%", limit, offset),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM projects ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-                (limit, offset),
-            ).fetchall()
-        return [row_to_dict(row) for row in rows]
+            conditions.append("sku LIKE ?")
+            params.append(f"%{sku.strip()}%")
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.extend([limit, offset])
+        rows = conn.execute(
+            f"SELECT * FROM projects {where} ORDER BY updated_at DESC LIMIT ? OFFSET ?",
+            tuple(params),
+        ).fetchall()
+        results = []
+        for row in rows:
+            project = row_to_dict(row)
+            downloaded = conn.execute(
+                "SELECT COUNT(*) as cnt FROM docx_workflow_runs WHERE project_id = ? AND downloaded_at IS NOT NULL AND downloaded_at != ''",
+                (project["id"],),
+            ).fetchone()
+            project["has_downloads"] = (downloaded["cnt"] if downloaded else 0) > 0
+            results.append(project)
+        return results
 
 
 @app.post("/api/projects")
@@ -1035,8 +1196,8 @@ def create_project(payload: ProjectIn) -> dict:
         project_id = new_id()
         name = payload.name.strip() or sku
         conn.execute(
-            "INSERT INTO projects (id, sku, category, name, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (project_id, sku, payload.category.strip(), name, payload.notes, ts, ts),
+            "INSERT INTO projects (id, user_id, sku, category, name, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (project_id, payload.user_id or "default", sku, payload.category.strip(), name, payload.notes, ts, ts),
         )
         return fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))
 

@@ -39,9 +39,10 @@ def from_json(value: str | None, default: Any = None) -> Any:
 def get_db() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
     return conn
 
 
@@ -84,8 +85,15 @@ def init_db() -> None:
     with get_db() as conn:
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS users (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS projects (
                 id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL DEFAULT 'default',
                 sku TEXT NOT NULL,
                 category TEXT NOT NULL,
                 name TEXT NOT NULL,
@@ -340,6 +348,15 @@ def table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
 
 
 def migrate_existing_db(conn: sqlite3.Connection) -> None:
+    # Users table migration
+    existing_tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if "users" not in existing_tables:
+        conn.execute("CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL)")
+    conn.execute("INSERT OR IGNORE INTO users (id, name, created_at) VALUES (?, ?, ?)", ("default", "默认用户", now_iso()))
+    # Projects user_id migration
+    project_columns = table_columns(conn, "projects")
+    if project_columns and "user_id" not in project_columns:
+        conn.execute("ALTER TABLE projects ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'")
     step_columns = table_columns(conn, "docx_workflow_steps")
     if "input_refs_json" not in step_columns:
         conn.execute("ALTER TABLE docx_workflow_steps ADD COLUMN input_refs_json TEXT NOT NULL DEFAULT '[]'")
@@ -348,3 +365,7 @@ def migrate_existing_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE rag_reference_selections ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
     if rag_columns and "model_description" not in rag_columns:
         conn.execute("ALTER TABLE rag_reference_selections ADD COLUMN model_description TEXT DEFAULT ''")
+    # Docx workflow runs: track download status
+    run_columns = table_columns(conn, "docx_workflow_runs")
+    if run_columns and "downloaded_at" not in run_columns:
+        conn.execute("ALTER TABLE docx_workflow_runs ADD COLUMN downloaded_at TEXT DEFAULT ''")
