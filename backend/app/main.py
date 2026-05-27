@@ -5,6 +5,7 @@ import io
 import json
 import re
 import shutil
+import sqlite3
 import sys
 import threading
 import zipfile
@@ -285,6 +286,44 @@ def fetch_docx_run_package(conn, run_id: str) -> dict:
     return run
 
 
+def fetch_project_workflow_steps(conn: sqlite3.Connection, project_id: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM project_workflow_steps WHERE project_id = ? ORDER BY generation_order ASC",
+        (project_id,),
+    ).fetchall()
+    return [hydrate_docx_step(row_to_dict(row)) for row in rows]
+
+
+def fetch_project_workflow_package(conn: sqlite3.Connection, project_id: str) -> dict:
+    project = fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))
+    steps = fetch_project_workflow_steps(conn, project_id)
+    pseudo_run = {
+        "id": project_id,
+        "project_id": project_id,
+        "product_name": project.get("product_name", ""),
+        "material": project.get("material", ""),
+        "style_key": project.get("style_key", ""),
+        "product_asset_id": project.get("product_asset_id", ""),
+        "model_asset_id": project.get("model_asset_id", ""),
+        "fit_asset_id": project.get("fit_asset_id", ""),
+        "scene_asset_id": project.get("scene_asset_id", ""),
+    }
+    steps = attach_docx_reference_items(conn, pseudo_run, steps)
+    return {
+        "project_id": project_id,
+        "product_name": project.get("product_name", ""),
+        "material": project.get("material", ""),
+        "style_key": project.get("style_key", ""),
+        "image_model": project.get("image_model", ""),
+        "size": project.get("size", "1024x1024"),
+        "quality": project.get("quality", "high"),
+        "workflow_status": project.get("workflow_status", "idle"),
+        "workflow_error": project.get("workflow_error", ""),
+        "downloaded_at": project.get("downloaded_at", ""),
+        "steps": steps,
+    }
+
+
 def attach_docx_reference_items(conn, run: dict, steps: list[dict]) -> list[dict]:
     asset_ids: list[str] = []
     rag_ids: list[str] = []
@@ -436,6 +475,50 @@ def insert_docx_workflow_steps(conn, run_id: str, payload: DocxWorkflowRunIn) ->
                 "pending",
                 ts,
                 ts,
+            ),
+        )
+
+
+def insert_project_workflow_steps(conn: sqlite3.Connection, project_id: str, payload) -> None:
+    from backend.app.docx_workflow import build_workflow_steps
+
+    ts = now_iso()
+    steps = build_workflow_steps(
+        product_name=payload.product_name.strip(),
+        material=payload.material.strip(),
+        style_key=payload.style_key,
+        product_asset_id=payload.product_asset_id,
+        model_asset_id=payload.model_asset_id,
+        fit_asset_id=payload.fit_asset_id,
+        scene_asset_id=payload.scene_asset_id,
+    )
+    rag_references = get_rag_references_for_project(conn, project_id)
+    steps = enrich_docx_steps_with_rag(steps, rag_references)
+    for step_def in steps:
+        step_id = new_id()
+        refs = step_def.get("input_refs") or []
+        for asset_col, ref_type in [
+            ("product_asset_id", "product_image"),
+            ("model_asset_id", "model_reference"),
+            ("fit_asset_id", "fit_reference"),
+            ("scene_asset_id", "scene_style_reference"),
+        ]:
+            asset_id = getattr(payload, asset_col, "") or ""
+            if asset_id and not any(r.get("id") == asset_id for r in refs):
+                refs.append({"type": "asset", "id": asset_id})
+        conn.execute(
+            """INSERT INTO project_workflow_steps
+               (id, project_id, stage_id, image_no, generation_order, title, prompt,
+                input_asset_ids_json, input_step_ids_json, input_refs_json,
+                image_path, params_json, status, error, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '{}', 'pending', '', ?, ?)""",
+            (
+                step_id, project_id, step_def["stage_id"], step_def["image_no"],
+                step_def["generation_order"], step_def["title"], step_def["prompt"],
+                to_json(step_def.get("input_asset_ids") or []),
+                to_json(step_def.get("input_step_ids") or []),
+                to_json(refs),
+                ts, ts,
             ),
         )
 
@@ -725,6 +808,30 @@ def update_docx_run_status_after_step(conn, run_id: str, image_model: str, size:
         WHERE id = ?
         """,
         (status, error, image_model or "", size, quality, now_iso(), run_id),
+    )
+
+
+def update_project_workflow_status(conn: sqlite3.Connection, project_id: str) -> None:
+    rows = conn.execute(
+        "SELECT status FROM project_workflow_steps WHERE project_id = ?",
+        (project_id,),
+    ).fetchall()
+    statuses = [r["status"] for r in rows]
+    if not statuses:
+        return
+    if all(s == "success" for s in statuses):
+        new_status = "success"
+    elif any(s == "failed" for s in statuses):
+        new_status = "failed"
+    elif any(s == "running" for s in statuses):
+        new_status = "running"
+    elif any(s == "success" for s in statuses):
+        new_status = "partial"
+    else:
+        new_status = "idle"
+    conn.execute(
+        "UPDATE projects SET workflow_status = ?, updated_at = ? WHERE id = ?",
+        (new_status, now_iso(), project_id),
     )
 
 
