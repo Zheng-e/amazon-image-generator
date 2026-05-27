@@ -2,7 +2,6 @@ import {
   Check,
   Database,
   FileImage,
-  FlaskConical,
   ImagePlus,
   Plus,
   RefreshCw,
@@ -55,9 +54,24 @@ function ImagePreviewModal({ src, alt, onClose }) {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function docxRunReadyToDownload(run) {
-  const steps = run?.steps || [];
-  return steps.length === 9 && steps.every((step) => step.status === "success" && step.url);
+function docxRunReadyToDownload(wf) {
+  const steps = wf?.steps || [];
+  return steps.length === 9 && steps.every((step) => step.status === "success" && (step.url || step.image_path));
+}
+
+function WorkflowStatusBadge({ project }) {
+  const status = project.workflow_status || "idle";
+  const labels = { idle: "待开始", running: "生成中", partial: "部分完成", success: "已完成", failed: "失败" };
+  if (project.has_downloads) {
+    return <span className="workflow-badge downloaded">已下载</span>;
+  }
+  return <span className={`workflow-badge ${status}`}>{labels[status] || status}</span>;
+}
+
+function StepProgress({ project }) {
+  const summary = project.step_summary;
+  if (!summary || summary.total === 0) return null;
+  return <small className="step-progress">{summary.success}/{summary.total} 张已完成</small>;
 }
 
 async function request(path, options = {}) {
@@ -70,54 +84,6 @@ async function request(path, options = {}) {
     throw new Error(text || `HTTP ${res.status}`);
   }
   return res.json();
-}
-
-function ProjectPanel({ projects, selectedProject, setSelectedProject, onCreate, onDelete }) {
-  const [form, setForm] = useState({ sku: "", category: "", name: "", notes: "" });
-  const [search, setSearch] = useState("");
-  const filtered = search.trim()
-    ? projects.filter((p) => (p.sku || "").toLowerCase().includes(search.trim().toLowerCase()))
-    : projects;
-  return (
-    <section className="panel compact">
-      <div className="section-title">
-        <FlaskConical size={18} />
-        <h2>项目</h2>
-      </div>
-      <div className="form-grid">
-        <input placeholder="SKU" value={form.sku} onChange={(e) => setForm({ ...form, sku: e.target.value })} />
-        <input placeholder="品类" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
-        <input placeholder="项目名称" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        <textarea placeholder="备注" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-      </div>
-      <button className="primary wide" onClick={() => onCreate(form)}>
-        <Plus size={16} />
-        创建项目
-      </button>
-      <div className="project-search">
-        <Search size={14} />
-        <input placeholder="搜索 SKU…" value={search} onChange={(e) => setSearch(e.target.value)} />
-      </div>
-      <div className="project-list">
-        {filtered.map((project) => (
-          <div key={project.id} className={selectedProject?.id === project.id ? "project-row active" : "project-row"}>
-            <button className="project" onClick={() => setSelectedProject(project)}>
-              <strong>{project.sku}</strong>
-              <span>{project.name}</span>
-            </button>
-            {project.has_downloads ? (
-              <span className="project-done" title="已下载">
-                <Check size={14} />
-              </span>
-            ) : null}
-            <button className="icon-btn danger" title="删除项目" onClick={(e) => { e.stopPropagation(); onDelete(project.id); }}>
-              <Trash2 size={14} />
-            </button>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
 }
 
 function AssetPanel({ project, assets, refresh }) {
@@ -477,7 +443,7 @@ function DocxAssetSelect({ label, assets, slotHint, value, onChange }) {
   );
 }
 
-function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
+function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
   const [styles, setStyles] = useState([]);
   const [imageModels, setImageModels] = useState([]);
   const [form, setForm] = useState({
@@ -492,7 +458,7 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
     fit_asset_id: "",
     scene_asset_id: "",
   });
-  const [activeRun, setActiveRun] = useState(null);
+  const [workflow, setWorkflow] = useState(null);
   const [promptDrafts, setPromptDrafts] = useState({});
   const [busy, setBusy] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
@@ -510,28 +476,27 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
   }, []);
 
   useEffect(() => {
-    setActiveRun(null);
+    setWorkflow(null);
+    request(`/api/projects/${project.id}/workflow`)
+      .then(setWorkflow)
+      .catch(() => setWorkflow(null));
   }, [project.id]);
 
   useEffect(() => {
-    setActiveRun(null);
-  }, [form.product_name, form.material, form.style_key, form.image_model, form.size, form.quality, form.product_asset_id, form.model_asset_id, form.fit_asset_id, form.scene_asset_id]);
-
-  useEffect(() => {
     const drafts = {};
-    (activeRun?.steps || []).forEach((step) => {
+    (workflow?.steps || []).forEach((step) => {
       drafts[step.id] = step.prompt || "";
     });
     setPromptDrafts(drafts);
-  }, [activeRun]);
+  }, [workflow]);
 
   useEffect(() => {
-    if (!activeRun || activeRun.status !== "running") return;
+    if (!workflow || workflow.workflow_status !== "running") return;
     const interval = setInterval(async () => {
       try {
-        const updated = await request(`/api/docx-workflow/runs/${activeRun.id}`);
-        setActiveRun(updated);
-        if (updated.status !== "running") {
+        const updated = await request(`/api/projects/${project.id}/workflow`);
+        setWorkflow(updated);
+        if (updated.workflow_status !== "running") {
           clearInterval(interval);
           await refresh();
         }
@@ -540,7 +505,7 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
       }
     }, 10000);
     return () => clearInterval(interval);
-  }, [activeRun?.id, activeRun?.status]);
+  }, [workflow?.project_id, workflow?.workflow_status]);
 
   const ready =
     form.product_name.trim() &&
@@ -554,10 +519,10 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
     form.fit_asset_id &&
     form.scene_asset_id;
 
-  const createRun = async () => {
-    return request("/api/docx-workflow/runs", {
+  const initWorkflow = async () => {
+    return request(`/api/projects/${project.id}/workflow`, {
       method: "POST",
-      body: JSON.stringify({ project_id: project.id, ...form }),
+      body: JSON.stringify({ ...form }),
     });
   };
 
@@ -598,15 +563,15 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
   };
 
   const savePrompt = async (stepId, prompt) => {
-    const updated = await request(`/api/docx-workflow/steps/${stepId}`, {
+    const updated = await request(`/api/projects/workflow/steps/${stepId}`, {
       method: "PATCH",
       body: JSON.stringify({ prompt }),
     });
-    setActiveRun((current) => current ? { ...current, steps: (current.steps || []).map((step) => step.id === stepId ? { ...step, ...updated } : step) } : current);
+    setWorkflow((current) => current ? { ...current, steps: (current.steps || []).map((step) => step.id === stepId ? { ...step, ...updated } : step) } : current);
   };
 
   const saveAllPrompts = async () => {
-    const steps = activeRun?.steps || [];
+    const steps = workflow?.steps || [];
     await Promise.all(steps.map((step) => savePrompt(step.id, promptDrafts[step.id] ?? step.prompt ?? "")));
   };
 
@@ -614,9 +579,9 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
     if (!ready) return;
     setBusy(true);
     try {
-      const run = await createRun();
-      const detailed = await request(`/api/docx-workflow/runs/${run.id}/preview`, { method: "POST" });
-      setActiveRun(detailed);
+      const wf = await initWorkflow();
+      const detailed = await request(`/api/projects/${project.id}/workflow/preview`, { method: "POST" });
+      setWorkflow(detailed);
       await refresh();
     } finally {
       setBusy(false);
@@ -624,16 +589,20 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
   };
 
   const generate = async () => {
-    if (!ready && !activeRun) return;
+    if (!ready && !workflow) return;
     setBusy(true);
     try {
-      const run = activeRun || (await createRun());
-      if (activeRun) await saveAllPrompts();
-      await request(`/api/docx-workflow/runs/${run.id}/generate`, {
+      let wf = workflow;
+      if (!wf) {
+        wf = await initWorkflow();
+        setWorkflow(wf);
+      }
+      if (wf) await saveAllPrompts();
+      await request(`/api/projects/${project.id}/workflow/generate`, {
         method: "POST",
         body: JSON.stringify({ image_model: form.image_model, size: form.size, quality: form.quality }),
       });
-      setActiveRun(await request(`/api/docx-workflow/runs/${run.id}`));
+      setWorkflow(await request(`/api/projects/${project.id}/workflow`));
       await refresh();
     } catch (err) {
       alert(err.message);
@@ -643,15 +612,15 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
   };
 
   const downloadRun = async () => {
-    if (!activeRun?.id || !docxRunReadyToDownload(activeRun)) return;
+    if (!workflow || !docxRunReadyToDownload(workflow)) return;
     setBusy(true);
     try {
-      const res = await fetch(`${API}/api/docx-workflow/runs/${activeRun.id}/download`);
+      const res = await fetch(`${API}/api/projects/${project.id}/workflow/download`);
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
       const disposition = res.headers.get("Content-Disposition") || "";
       const match = disposition.match(/filename="([^"]+)"/);
-      const filename = match?.[1] || `${project.sku || "docx"}_${activeRun.id.slice(0, 8)}_images.zip`;
+      const filename = match?.[1] || `${project.sku || "docx"}_images.zip`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -665,20 +634,20 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
   };
 
   const regenerateStep = async (stepId) => {
-    if (!activeRun?.id) return;
+    if (!workflow) return;
     setBusy(true);
     try {
-      const prompt = promptDrafts[stepId] ?? activeRun.steps?.find((step) => step.id === stepId)?.prompt ?? "";
+      const prompt = promptDrafts[stepId] ?? workflow.steps?.find((step) => step.id === stepId)?.prompt ?? "";
       await savePrompt(stepId, prompt);
-      setActiveRun((current) => current ? {
+      setWorkflow((current) => current ? {
         ...current,
         steps: (current.steps || []).map((step) => step.id === stepId ? { ...step, status: "running", error: "", url: "" } : step),
       } : current);
-      const generated = await request(`/api/docx-workflow/steps/${stepId}/generate`, {
+      const generated = await request(`/api/projects/workflow/steps/${stepId}/generate`, {
         method: "POST",
         body: JSON.stringify({ image_model: form.image_model, size: form.size, quality: form.quality }),
       });
-      setActiveRun(generated);
+      setWorkflow(generated);
       await refresh();
     } finally {
       setBusy(false);
@@ -690,11 +659,11 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
     const newRefs = currentRefs.filter((ref) => !(ref.type === "rag" && ref.id === ragRefId));
     setBusy(true);
     try {
-      const updated = await request(`/api/docx-workflow/steps/${step.id}`, {
+      const updated = await request(`/api/projects/workflow/steps/${step.id}`, {
         method: "PATCH",
         body: JSON.stringify({ input_refs: newRefs }),
       });
-      setActiveRun((current) => current ? { ...current, steps: (current.steps || []).map((s) => s.id === step.id ? { ...s, ...updated } : s) } : current);
+      setWorkflow((current) => current ? { ...current, steps: (current.steps || []).map((s) => s.id === step.id ? { ...s, ...updated } : s) } : current);
     } catch (err) {
       alert(err.message);
     } finally {
@@ -706,7 +675,7 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
     if (!step?.id || !step.url) return;
     setBusy(true);
     try {
-      await request(`/api/docx-workflow/steps/${step.id}/knowledge-candidate`, {
+      await request(`/api/projects/workflow/steps/${step.id}/knowledge-candidate`, {
         method: "POST",
         body: JSON.stringify({
           rating: 5,
@@ -726,11 +695,6 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
     } finally {
       setBusy(false);
     }
-  };
-
-  const loadRun = async (runId) => {
-    const run = await request(`/api/docx-workflow/runs/${runId}`);
-    setActiveRun(run);
   };
 
   return (
@@ -821,34 +785,22 @@ function DocxWorkflowPanel({ project, assets, runs, refresh, onDownload }) {
           <FileImage size={16} />
           预览 9 张提示词
         </button>
-        <button className="primary" disabled={(!ready && !activeRun) || busy} onClick={generate}>
+        <button className="primary" disabled={(!ready && !workflow) || busy} onClick={generate}>
           <Sparkles size={16} />
           一键生成 9 张图
         </button>
-        <button disabled={!docxRunReadyToDownload(activeRun) || busy} onClick={downloadRun}>
+        <button disabled={!docxRunReadyToDownload(workflow) || busy} onClick={downloadRun}>
           一键下载 9 张图
         </button>
       </div>
-      <div className="run-list docx-run-list">
-        {(runs || []).map((run) => (
-          <button key={run.id} className={`docx-run-item ${run.status}`} onClick={() => loadRun(run.id)}>
-            <strong>{run.product_name}</strong>
-            <span className={`run-status-badge ${run.status}`}>
-              {run.status === "running" ? "生成中..." : run.status === "success" ? "已完成" : run.status === "failed" ? "失败" : run.status === "partial" ? "部分完成" : run.status}
-            </span>
-            <small>{run.created_at}</small>
-            {run.error ? <small className="run-error">{run.error}</small> : null}
-          </button>
-        ))}
-      </div>
-      {activeRun ? (
+      {workflow ? (
         <div className="docx-preview">
           <div className="prompt-head">
-            <strong>{activeRun.product_name} / {activeRun.material}</strong>
-            <span>{activeRun.status}</span>
+            <strong>{workflow.product_name || project.name} / {workflow.material || ""}</strong>
+            <span>{workflow.workflow_status || workflow.status}</span>
           </div>
           <div className="workflow-step-grid">
-            {(activeRun.steps || []).map((step) => (
+            {(workflow.steps || []).map((step) => (
               <article key={step.id} className={`workflow-step ${step.status}`}>
                 <div className="workflow-step-head">
                   <span>#{step.image_no}</span>
@@ -961,6 +913,10 @@ function UserSelectScreen({ users, onSelect, onCreate }) {
 
 function ProjectSelectScreen({ user, projects, onSelect, onCreate, onDelete, onBack }) {
   const [form, setForm] = useState({ sku: "", category: "", name: "", notes: "" });
+  const [search, setSearch] = useState("");
+  const filtered = search.trim()
+    ? projects.filter((p) => (p.sku || "").toLowerCase().includes(search.trim().toLowerCase()))
+    : projects;
   const handleCreate = () => {
     if (!form.sku.trim()) return;
     onCreate(form);
@@ -985,8 +941,12 @@ function ProjectSelectScreen({ user, projects, onSelect, onCreate, onDelete, onB
             创建项目
           </button>
         </div>
+        <div className="project-overview-search">
+          <Search size={14} />
+          <input placeholder="搜索 SKU…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        </div>
         <div className="project-select-list">
-          {projects.map((project) => (
+          {filtered.map((project) => (
             <div key={project.id} className="project-select-card-wrap">
               <button
                 className="project-select-card"
@@ -995,14 +955,16 @@ function ProjectSelectScreen({ user, projects, onSelect, onCreate, onDelete, onB
                 <strong>{project.sku}</strong>
                 <span>{project.name}</span>
                 <small>{project.category || "未分类"}</small>
+                <WorkflowStatusBadge project={project} />
+                <StepProgress project={project} />
               </button>
               <button className="icon-btn danger project-delete-btn" title="删除项目" onClick={() => onDelete(project.id)}>
                 <Trash2 size={14} />
               </button>
             </div>
           ))}
-          {projects.length === 0 && (
-            <p className="muted">该用户还没有项目，请先创建一个。</p>
+          {filtered.length === 0 && (
+            <p className="muted">{search.trim() ? "没有匹配的项目。" : "该用户还没有项目，请先创建一个。"}</p>
           )}
         </div>
       </div>
@@ -1077,7 +1039,6 @@ export default function App() {
   };
 
   const assets = projectDetail?.assets || [];
-  const docxRuns = projectDetail?.docx_workflow_runs || [];
 
   if (phase === "user") {
     return (
@@ -1139,21 +1100,16 @@ export default function App() {
         </div>
       </header>
       {error ? <div className="error-banner">{error}</div> : null}
-      <main>
-        <aside>
-          <ProjectPanel projects={projects} selectedProject={selectedProject} setSelectedProject={setSelectedProject} onCreate={createProject} onDelete={deleteProject} />
-        </aside>
-        <div className="workspace">
-          {selectedProject && projectDetail ? (
-            <>
-              <AssetPanel project={selectedProject} assets={assets} refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
-              <RagKnowledgeWorkbench project={selectedProject} refreshProject={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
-              <DocxWorkflowPanel project={selectedProject} assets={assets} runs={docxRuns} refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} onDownload={() => loadProjects(selectedUser.id)} />
-            </>
-          ) : (
-            <section className="empty-state">请从左侧选择一个项目。</section>
-          )}
-        </div>
+      <main className="no-sidebar">
+        {selectedProject && projectDetail ? (
+          <div className="workspace">
+            <AssetPanel project={selectedProject} assets={assets} refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
+            <RagKnowledgeWorkbench project={selectedProject} refreshProject={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
+            <DocxWorkflowPanel project={selectedProject} assets={assets} refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} onDownload={() => loadProjects(selectedUser.id)} />
+          </div>
+        ) : (
+          <section className="empty-state">请从左侧选择一个项目。</section>
+        )}
       </main>
     </div>
   );

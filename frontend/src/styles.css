@@ -109,6 +109,10 @@ main {
   padding: 16px;
 }
 
+main.no-sidebar {
+  grid-template-columns: 1fr;
+}
+
 aside,
 .workspace {
   display: flex;
@@ -180,59 +184,6 @@ aside,
   gap: 8px;
 }
 
-.project-list {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.project-search {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-  padding: 6px 10px;
-  border: 1px solid #e0ddd4;
-  border-radius: 6px;
-  background: #fff;
-}
-
-.project-search svg {
-  color: #9a9589;
-  flex-shrink: 0;
-}
-
-.project-search input {
-  border: none;
-  outline: none;
-  background: transparent;
-  font-size: 13px;
-  width: 100%;
-  padding: 0;
-}
-
-.project-done {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: #315f59;
-  flex-shrink: 0;
-}
-
-.project {
-  justify-content: flex-start;
-  flex-direction: column;
-  align-items: flex-start;
-  min-height: 54px;
-}
-
-.project span {
-  color: #6d6a62;
-  font-size: 12px;
-}
-
-.project-row.active .project,
 .segmented .active,
 .record.confirmed {
   border-color: #315f59;
@@ -534,10 +485,6 @@ figcaption small {
   margin-top: 14px;
 }
 
-.docx-run-list {
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-}
-
 .docx-preview {
   margin-top: 14px;
   border-top: 1px solid #d7e0e5;
@@ -665,21 +612,6 @@ figcaption small {
   text-align: center;
   color: #6d6a62;
   background: #ffffff;
-}
-
-.project-row {
-  display: flex;
-  align-items: stretch;
-  gap: 4px;
-}
-
-.project-row .project {
-  flex: 1;
-  min-width: 0;
-}
-
-.project-row.active {
-  border-left: 3px solid #315f59;
 }
 
 .icon-btn {
@@ -1284,53 +1216,75 @@ figure:hover .figure-del {
   }
 }
 
-/* Run status badges in run list */
-.run-status-badge {
-  font-size: 12px;
+/* Project overview search */
+.project-overview-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+  padding: 6px 10px;
+  border: 1px solid #e0ddd4;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.project-overview-search svg {
+  color: #9a9589;
+  flex-shrink: 0;
+}
+
+.project-overview-search input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  width: 100%;
+  padding: 0;
+}
+
+/* Workflow status badges */
+.workflow-badge {
+  font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
   display: inline-block;
+  margin-top: 4px;
 }
 
-.run-status-badge.running {
+.workflow-badge.idle {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.workflow-badge.running {
   background: #dbeafe;
   color: #1e40af;
 }
 
-.run-status-badge.success {
-  background: #dcfce7;
-  color: #166534;
-}
-
-.run-status-badge.failed {
-  background: #fee2e2;
-  color: #991b1b;
-}
-
-.run-status-badge.partial {
+.workflow-badge.partial {
   background: #fef3c7;
   color: #92400e;
 }
 
-.docx-run-item {
-  align-items: flex-start;
-  justify-content: flex-start;
-  flex-direction: column;
-  text-align: left;
-  gap: 4px;
+.workflow-badge.success {
+  background: #dcfce7;
+  color: #166534;
 }
 
-.docx-run-item.running {
-  border-color: #93c5fd;
-  background: #eff6ff;
+.workflow-badge.downloaded {
+  background: #d1fae5;
+  color: #065f46;
 }
 
-.run-error {
-  color: #b91c1c;
+.workflow-badge.failed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* Step progress */
+.step-progress {
   font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
+  color: #6d6a62;
+  margin-top: 2px;
 }
 
