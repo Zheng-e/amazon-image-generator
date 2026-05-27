@@ -4,8 +4,6 @@ import {
   FileImage,
   ImagePlus,
   Plus,
-  RefreshCw,
-  Save,
   Search,
   Sparkles,
   Star,

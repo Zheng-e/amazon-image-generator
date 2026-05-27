@@ -632,6 +632,7 @@ def list_docx_workflow_styles() -> list[dict[str, str]]:
     return style_options_payload()
 
 
+# DEPRECATED — use POST /api/projects/{project_id}/workflow instead
 @app.post("/api/docx-workflow/runs")
 def create_docx_workflow_run(payload: DocxWorkflowRunIn) -> dict:
     with get_db() as conn:
@@ -667,18 +668,21 @@ def create_docx_workflow_run(payload: DocxWorkflowRunIn) -> dict:
         return fetch_docx_run_package(conn, run_id)
 
 
+# DEPRECATED — use POST /api/projects/{project_id}/workflow/preview instead
 @app.post("/api/docx-workflow/runs/{run_id}/preview")
 def preview_docx_workflow_run(run_id: str) -> dict:
     with get_db() as conn:
         return fetch_docx_run_package(conn, run_id)
 
 
+# DEPRECATED — use GET /api/projects/{project_id}/workflow instead
 @app.get("/api/docx-workflow/runs/{run_id}")
 def get_docx_workflow_run(run_id: str) -> dict:
     with get_db() as conn:
         return fetch_docx_run_package(conn, run_id)
 
 
+# DEPRECATED — use GET /api/projects/{project_id}/workflow/download instead
 @app.get("/api/docx-workflow/runs/{run_id}/download")
 def download_docx_workflow_run(run_id: str) -> Response:
     with get_db() as conn:
@@ -704,6 +708,7 @@ def download_docx_workflow_run(run_id: str) -> Response:
     )
 
 
+# DEPRECATED — use PATCH /api/projects/workflow/steps/{step_id} instead
 @app.patch("/api/docx-workflow/steps/{step_id}")
 def update_docx_workflow_step(step_id: str, payload: DocxWorkflowStepUpdateIn) -> dict:
     with get_db() as conn:
@@ -836,6 +841,7 @@ def update_project_workflow_status(conn: sqlite3.Connection, project_id: str) ->
     )
 
 
+# DEPRECATED — use POST /api/projects/workflow/steps/{step_id}/generate instead
 @app.post("/api/docx-workflow/steps/{step_id}/generate")
 def regenerate_docx_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn | None = None) -> dict:
     payload = payload or DocxWorkflowGenerateIn()
@@ -941,6 +947,7 @@ def regenerate_docx_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn 
             return fetch_docx_run_package(conn, run["id"])
 
 
+# DEPRECATED — use POST /api/projects/workflow/steps/{step_id}/knowledge-candidate instead
 @app.post("/api/docx-workflow/steps/{step_id}/knowledge-candidate")
 def create_docx_knowledge_candidate(step_id: str, payload: KnowledgeCandidateIn) -> dict:
     with get_db() as conn:
@@ -1224,6 +1231,7 @@ def _cleanup_project_task(project_id: str) -> None:
         _active_tasks.pop(project_id, None)
 
 
+# DEPRECATED — use POST /api/projects/{project_id}/workflow/generate instead
 @app.post("/api/docx-workflow/runs/{run_id}/generate")
 def generate_docx_workflow_run(run_id: str, payload: DocxWorkflowGenerateIn | None = None) -> dict:
     payload = payload or DocxWorkflowGenerateIn()
@@ -1281,6 +1289,7 @@ def generate_docx_workflow_run(run_id: str, payload: DocxWorkflowGenerateIn | No
         return fetch_docx_run_package(conn, run_id)
 
 
+# DEPRECATED — project-based workflow replaces run-based approach
 @app.get("/api/docx-workflow/all-runs")
 def list_all_docx_runs(
     user_id: str = Query("", description="Filter by user"),
