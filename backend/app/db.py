@@ -98,6 +98,19 @@ def init_db() -> None:
                 category TEXT NOT NULL,
                 name TEXT NOT NULL,
                 notes TEXT DEFAULT '',
+                product_name TEXT NOT NULL DEFAULT '',
+                material TEXT NOT NULL DEFAULT '',
+                style_key TEXT NOT NULL DEFAULT 'natural_fashion',
+                product_asset_id TEXT DEFAULT '',
+                model_asset_id TEXT DEFAULT '',
+                fit_asset_id TEXT DEFAULT '',
+                scene_asset_id TEXT DEFAULT '',
+                image_model TEXT NOT NULL DEFAULT '',
+                size TEXT NOT NULL DEFAULT '1024x1024',
+                quality TEXT NOT NULL DEFAULT 'high',
+                workflow_status TEXT NOT NULL DEFAULT 'idle',
+                workflow_error TEXT DEFAULT '',
+                downloaded_at TEXT DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -300,6 +313,26 @@ def init_db() -> None:
                 FOREIGN KEY(run_id) REFERENCES docx_workflow_runs(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS project_workflow_steps (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                stage_id TEXT NOT NULL,
+                image_no INTEGER NOT NULL,
+                generation_order INTEGER NOT NULL,
+                title TEXT NOT NULL DEFAULT '',
+                prompt TEXT NOT NULL DEFAULT '',
+                input_asset_ids_json TEXT NOT NULL DEFAULT '[]',
+                input_step_ids_json TEXT NOT NULL DEFAULT '[]',
+                input_refs_json TEXT NOT NULL DEFAULT '[]',
+                image_path TEXT NOT NULL DEFAULT '',
+                params_json TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'pending',
+                error TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS rag_reference_selections (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL,
@@ -369,3 +402,44 @@ def migrate_existing_db(conn: sqlite3.Connection) -> None:
     run_columns = table_columns(conn, "docx_workflow_runs")
     if run_columns and "downloaded_at" not in run_columns:
         conn.execute("ALTER TABLE docx_workflow_runs ADD COLUMN downloaded_at TEXT DEFAULT ''")
+    # Project-level workflow fields
+    project_cols = table_columns(conn, "projects")
+    for col, definition in [
+        ("product_name", "TEXT NOT NULL DEFAULT ''"),
+        ("material", "TEXT NOT NULL DEFAULT ''"),
+        ("style_key", "TEXT NOT NULL DEFAULT 'natural_fashion'"),
+        ("product_asset_id", "TEXT DEFAULT ''"),
+        ("model_asset_id", "TEXT DEFAULT ''"),
+        ("fit_asset_id", "TEXT DEFAULT ''"),
+        ("scene_asset_id", "TEXT DEFAULT ''"),
+        ("image_model", "TEXT NOT NULL DEFAULT ''"),
+        ("size", "TEXT NOT NULL DEFAULT '1024x1024'"),
+        ("quality", "TEXT NOT NULL DEFAULT 'high'"),
+        ("workflow_status", "TEXT NOT NULL DEFAULT 'idle'"),
+        ("workflow_error", "TEXT DEFAULT ''"),
+        ("downloaded_at", "TEXT DEFAULT ''"),
+    ]:
+        if col not in project_cols:
+            conn.execute(f"ALTER TABLE projects ADD COLUMN {col} {definition}")
+    # Create project_workflow_steps if missing
+    existing_tables = {row["name"] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()}
+    if "project_workflow_steps" not in existing_tables:
+        conn.execute("""CREATE TABLE project_workflow_steps (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            stage_id TEXT NOT NULL,
+            image_no INTEGER NOT NULL,
+            generation_order INTEGER NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            prompt TEXT NOT NULL DEFAULT '',
+            input_asset_ids_json TEXT NOT NULL DEFAULT '[]',
+            input_step_ids_json TEXT NOT NULL DEFAULT '[]',
+            input_refs_json TEXT NOT NULL DEFAULT '[]',
+            image_path TEXT NOT NULL DEFAULT '',
+            params_json TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'pending',
+            error TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+        )""")
