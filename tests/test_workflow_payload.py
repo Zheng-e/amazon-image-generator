@@ -11,9 +11,11 @@ def test_project_workflow_payload_accepts_path_project_id():
         fit_side_asset_id="fit-side-asset",
         fit_back_asset_id="fit-back-asset",
         scene_asset_id="scene-asset",
+        accessory_asset_id="accessory-asset",
     )
 
     assert payload.project_id == ""
     assert payload.fit_front_asset_id == "fit-front-asset"
     assert payload.fit_side_asset_id == "fit-side-asset"
     assert payload.fit_back_asset_id == "fit-back-asset"
+    assert payload.accessory_asset_id == "accessory-asset"

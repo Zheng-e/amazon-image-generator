@@ -1,7 +1,7 @@
 from backend.app.docx_workflow import build_workflow_steps
 
 
-def build_steps():
+def build_steps(accessory_asset_id=""):
     return build_workflow_steps(
         product_name="白色吊带背心",
         material="棉混纺",
@@ -12,6 +12,7 @@ def build_steps():
         fit_side_asset_id="fit-side-asset",
         fit_back_asset_id="fit-back-asset",
         scene_asset_id="scene-asset",
+        accessory_asset_id=accessory_asset_id,
     )
 
 
@@ -42,19 +43,29 @@ def test_white_steps_have_pose_slot():
         ]
 
 
-def test_outfit_step_has_accessory_slot():
+def test_outfit_step_without_accessory():
     steps = build_steps()
     outfit = next(step for step in steps if step["stage_id"] == "outfit")
 
-    assert outfit["accessory_slot"] is True
+    assert outfit["input_asset_ids"] == []
     assert outfit["input_refs"] == [{"type": "step", "id": "scene_model"}]
 
 
-def test_other_steps_do_not_have_pose_slot_or_accessory_slot():
-    steps = build_steps()
-    non_special_steps = [step for step in steps if step["stage_id"] not in ("angle_3", "angle_4", "angle_5", "angle_6", "white_main", "white_back", "outfit")]
+def test_outfit_step_with_accessory():
+    steps = build_steps(accessory_asset_id="accessory-asset")
+    outfit = next(step for step in steps if step["stage_id"] == "outfit")
 
-    assert len(non_special_steps) == 2
-    for step in non_special_steps:
+    assert outfit["input_asset_ids"] == ["accessory-asset"]
+    assert outfit["input_refs"] == [
+        {"type": "step", "id": "scene_model"},
+        {"type": "asset", "id": "accessory-asset"},
+    ]
+
+
+def test_other_steps_do_not_have_pose_slot():
+    steps = build_steps()
+    non_pose_steps = [step for step in steps if step["stage_id"] not in ("angle_3", "angle_4", "angle_5", "angle_6", "white_main", "white_back")]
+
+    assert len(non_pose_steps) == 3
+    for step in non_pose_steps:
         assert "pose_slot" not in step
-        assert "accessory_slot" not in step

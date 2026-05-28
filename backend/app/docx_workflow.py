@@ -174,9 +174,17 @@ def build_workflow_steps(
     fit_side_asset_id: str,
     fit_back_asset_id: str,
     scene_asset_id: str,
+    accessory_asset_id: str = "",
 ) -> list[dict[str, Any]]:
     style_prompt = STYLE_OPTIONS[style_key]["prompt"]
     angle_prompt = _angle_prompt(style_prompt)
+
+    outfit_input_asset_ids: list[str] = []
+    outfit_input_refs: list[dict[str, str]] = [{"type": "step", "id": "scene_model"}]
+    if accessory_asset_id:
+        outfit_input_asset_ids.append(accessory_asset_id)
+        outfit_input_refs.append({"type": "asset", "id": accessory_asset_id})
+
     return [
         {
             "stage_id": "model_on_body",
@@ -230,10 +238,9 @@ def build_workflow_steps(
             "generation_order": 7,
             "title": "第七张：穿搭图",
             "prompt": _outfit_prompt(style_prompt),
-            "input_asset_ids": [],
+            "input_asset_ids": outfit_input_asset_ids,
             "input_step_ids": ["scene_model"],
-            "input_refs": [{"type": "step", "id": "scene_model"}],
-            "accessory_slot": True,
+            "input_refs": outfit_input_refs,
         },
         {
             "stage_id": "white_main",
