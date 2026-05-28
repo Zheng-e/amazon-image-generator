@@ -366,7 +366,9 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
     quality: "high",
     product_asset_id: "",
     model_asset_id: "",
-    fit_asset_id: "",
+    fit_front_asset_id: "",
+    fit_side_asset_id: "",
+    fit_back_asset_id: "",
     scene_asset_id: "",
     pose_asset_id: "",
   });
@@ -376,7 +378,9 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
   const [previewImage, setPreviewImage] = useState(null);
   const productFileRef = useRef(null);
   const modelFileRef = useRef(null);
-  const fitFileRef = useRef(null);
+  const fitFrontFileRef = useRef(null);
+  const fitSideFileRef = useRef(null);
+  const fitBackFileRef = useRef(null);
   const sceneFileRef = useRef(null);
   const poseFileRef = useRef(null);
 
@@ -415,7 +419,9 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
       quality: current.quality || workflow.quality || "high",
       product_asset_id: current.product_asset_id || workflow.product_asset_id || "",
       model_asset_id: current.model_asset_id || workflow.model_asset_id || "",
-      fit_asset_id: current.fit_asset_id || workflow.fit_asset_id || "",
+      fit_front_asset_id: current.fit_front_asset_id || workflow.fit_front_asset_id || "",
+      fit_side_asset_id: current.fit_side_asset_id || workflow.fit_side_asset_id || "",
+      fit_back_asset_id: current.fit_back_asset_id || workflow.fit_back_asset_id || "",
       scene_asset_id: current.scene_asset_id || workflow.scene_asset_id || "",
       pose_asset_id: current.pose_asset_id || workflow.pose_asset_id || "",
     }));
@@ -447,7 +453,9 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
     form.quality &&
     form.product_asset_id &&
     form.model_asset_id &&
-    form.fit_asset_id &&
+    form.fit_front_asset_id &&
+    form.fit_side_asset_id &&
+    form.fit_back_asset_id &&
     form.scene_asset_id;
 
   const initWorkflow = async () => {
@@ -474,10 +482,12 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
   const uploadRequiredAssets = async () => {
     setBusy(true);
     try {
-      const [productId, modelId, fitId, sceneId, poseId] = await Promise.all([
+      const [productId, modelId, fitFrontId, fitSideId, fitBackId, sceneId, poseId] = await Promise.all([
         uploadOne(productFileRef, "product", "product_image", "固定九图流程：产品图"),
         uploadOne(modelFileRef, "model", "model_reference", "固定九图流程：模特面部及身材参考图"),
-        uploadOne(fitFileRef, "competitor", "fit_reference", "固定九图流程：衣服上身效果参考图"),
+        uploadOne(fitFrontFileRef, "competitor", "fit_front_reference", "固定九图流程：衣服上身效果正面参考图"),
+        uploadOne(fitSideFileRef, "competitor", "fit_side_reference", "固定九图流程：衣服上身效果侧面参考图"),
+        uploadOne(fitBackFileRef, "competitor", "fit_back_reference", "固定九图流程：衣服上身效果背面参考图"),
         uploadOne(sceneFileRef, "competitor", "scene_style_reference", "固定九图流程：场景风格参考图"),
         uploadOne(poseFileRef, "competitor", "pose_reference", "固定九图流程：姿势参考图"),
       ]);
@@ -485,11 +495,13 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
         ...current,
         product_asset_id: productId || current.product_asset_id,
         model_asset_id: modelId || current.model_asset_id,
-        fit_asset_id: fitId || current.fit_asset_id,
+        fit_front_asset_id: fitFrontId || current.fit_front_asset_id,
+        fit_side_asset_id: fitSideId || current.fit_side_asset_id,
+        fit_back_asset_id: fitBackId || current.fit_back_asset_id,
         scene_asset_id: sceneId || current.scene_asset_id,
         pose_asset_id: poseId || current.pose_asset_id,
       }));
-      if (productId || modelId || fitId || sceneId || poseId) {
+      if (productId || modelId || fitFrontId || fitSideId || fitBackId || sceneId || poseId) {
         setWorkflow(null);
       }
       await refresh();
@@ -651,8 +663,16 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
           <input ref={modelFileRef} type="file" accept="image/*" />
         </label>
         <label className="stacked-field">
-          <span>衣服上身效果参考图</span>
-          <input ref={fitFileRef} type="file" accept="image/*" />
+          <span>衣服上身效果正面参考图</span>
+          <input ref={fitFrontFileRef} type="file" accept="image/*" />
+        </label>
+        <label className="stacked-field">
+          <span>衣服上身效果侧面参考图</span>
+          <input ref={fitSideFileRef} type="file" accept="image/*" />
+        </label>
+        <label className="stacked-field">
+          <span>衣服上身效果背面参考图</span>
+          <input ref={fitBackFileRef} type="file" accept="image/*" />
         </label>
         <label className="stacked-field">
           <span>场景风格参考图</span>
@@ -719,7 +739,9 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
       <div className="docx-asset-grid">
         <DocxAssetSelect label="产品图" assets={assets} slotHint="product_image" value={form.product_asset_id} onChange={(value) => setForm({ ...form, product_asset_id: value })} />
         <DocxAssetSelect label="模特面部及身材参考图" assets={assets} slotHint="model_reference" value={form.model_asset_id} onChange={(value) => setForm({ ...form, model_asset_id: value })} />
-        <DocxAssetSelect label="衣服上身效果参考图" assets={assets} slotHint="fit_reference" value={form.fit_asset_id} onChange={(value) => setForm({ ...form, fit_asset_id: value })} />
+        <DocxAssetSelect label="衣服上身效果正面参考图" assets={assets} slotHint="fit_front_reference" value={form.fit_front_asset_id} onChange={(value) => setForm({ ...form, fit_front_asset_id: value })} />
+        <DocxAssetSelect label="衣服上身效果侧面参考图" assets={assets} slotHint="fit_side_reference" value={form.fit_side_asset_id} onChange={(value) => setForm({ ...form, fit_side_asset_id: value })} />
+        <DocxAssetSelect label="衣服上身效果背面参考图" assets={assets} slotHint="fit_back_reference" value={form.fit_back_asset_id} onChange={(value) => setForm({ ...form, fit_back_asset_id: value })} />
         <DocxAssetSelect label="场景风格参考图" assets={assets} slotHint="scene_style_reference" value={form.scene_asset_id} onChange={(value) => setForm({ ...form, scene_asset_id: value })} />
         <DocxAssetSelect
           label="姿势参考图（可选）"

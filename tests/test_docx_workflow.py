@@ -8,7 +8,9 @@ def build_steps(pose_asset_id=""):
         style_key="natural_fashion",
         product_asset_id="product-asset",
         model_asset_id="model-asset",
-        fit_asset_id="fit-asset",
+        fit_front_asset_id="fit-front-asset",
+        fit_side_asset_id="fit-side-asset",
+        fit_back_asset_id="fit-back-asset",
         scene_asset_id="scene-asset",
         pose_asset_id=pose_asset_id,
     )

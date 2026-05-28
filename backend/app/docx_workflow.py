@@ -51,13 +51,17 @@ def _upper_body_spec(style_prompt: str) -> str:
 
 def _stage_1_prompt(product_name: str, material: str, style_prompt: str) -> str:
     desc = product_description(product_name, material)
-    return f"""重要：请严格按图片编号理解参考图，不能互换。图1只代表产品，图2只代表模特身份，图3只代表上身效果参考。
+    return f"""重要：请严格按图片编号理解参考图，不能互换。图1只代表产品，图2只代表模特身份，图3只代表上身效果正面参考。图4只代表上身效果侧面参考。图5只代表上身效果背面参考。
 
 图1为我的产品图（{desc}）
 
 图2为我的模特面部及身材参考图
 
-图3为衣服上身效果参考图（竞品）
+图3上身效果正面参考。
+
+图4上身效果侧面参考。
+
+图5上身效果背面参考。
 
 图片要求：
 
@@ -65,7 +69,7 @@ def _stage_1_prompt(product_name: str, material: str, style_prompt: str) -> str:
 
 2.严格参考图3的衣服松紧度，穿着方式及衣服长度
 
-3.下装与图3做70%差异化
+3.下装与图3风格一致，做10%差异化处理
 
 4.风格统一：严格遵循图1的摄影风格，包括色调（冷调/暖调/胶片感）、光影类型（自然光/柔光箱/逆光/侧光）、景深效果、画面质感。画面需要保持干净白底商品摄影感，不得生成街景、户外、生活场景或图3人物身份。
 
@@ -192,7 +196,9 @@ def build_workflow_steps(
     style_key: str,
     product_asset_id: str,
     model_asset_id: str,
-    fit_asset_id: str,
+    fit_front_asset_id: str,
+    fit_side_asset_id: str,
+    fit_back_asset_id: str,
     scene_asset_id: str,
     pose_asset_id: str = "",
 ) -> list[dict[str, Any]]:
@@ -211,12 +217,14 @@ def build_workflow_steps(
             "generation_order": 1,
             "title": "第一步：模特上身图",
             "prompt": _stage_1_prompt(product_name, material, style_prompt),
-            "input_asset_ids": [product_asset_id, model_asset_id, fit_asset_id],
+            "input_asset_ids": [product_asset_id, model_asset_id, fit_front_asset_id, fit_side_asset_id, fit_back_asset_id],
             "input_step_ids": [],
             "input_refs": [
                 {"type": "asset", "id": product_asset_id},
                 {"type": "asset", "id": model_asset_id},
-                {"type": "asset", "id": fit_asset_id},
+                {"type": "asset", "id": fit_front_asset_id},
+                {"type": "asset", "id": fit_side_asset_id},
+                {"type": "asset", "id": fit_back_asset_id},
             ],
         },
         {
