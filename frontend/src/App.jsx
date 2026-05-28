@@ -309,6 +309,7 @@ const DOCX_SLOT_TYPES = {
   fit_reference: ["competitor"],
   scene_style_reference: ["competitor"],
   pose_reference: ["competitor"],
+  accessory_reference: ["competitor"],
 };
 
 const DOCX_SLOT_LABELS = {
@@ -317,6 +318,7 @@ const DOCX_SLOT_LABELS = {
   fit_reference: "上身效果参考",
   scene_style_reference: "场景风格参考",
   pose_reference: "姿势参考",
+  accessory_reference: "配饰参考",
 };
 
 function docxAssetsForSlot(assets, slotHint) {
@@ -381,6 +383,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
   const fitSideFileRef = useRef(null);
   const fitBackFileRef = useRef(null);
   const sceneFileRef = useRef(null);
+  const accessoryFileRef = useRef(null);
 
   useEffect(() => {
     request("/api/docx-workflow/styles").then(setStyles).catch(() => setStyles([]));
@@ -479,13 +482,14 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
   const uploadRequiredAssets = async () => {
     setBusy(true);
     try {
-      const [productId, modelId, fitFrontId, fitSideId, fitBackId, sceneId] = await Promise.all([
+      const [productId, modelId, fitFrontId, fitSideId, fitBackId, sceneId, accessoryId] = await Promise.all([
         uploadOne(productFileRef, "product", "product_image", "固定九图流程：产品图"),
         uploadOne(modelFileRef, "model", "model_reference", "固定九图流程：模特面部及身材参考图"),
         uploadOne(fitFrontFileRef, "competitor", "fit_front_reference", "固定九图流程：衣服上身效果正面参考图"),
         uploadOne(fitSideFileRef, "competitor", "fit_side_reference", "固定九图流程：衣服上身效果侧面参考图"),
         uploadOne(fitBackFileRef, "competitor", "fit_back_reference", "固定九图流程：衣服上身效果背面参考图"),
         uploadOne(sceneFileRef, "competitor", "scene_style_reference", "固定九图流程：场景风格参考图"),
+        uploadOne(accessoryFileRef, "competitor", "accessory_reference", "固定九图流程：配饰参考图"),
       ]);
       setForm((current) => ({
         ...current,
@@ -496,7 +500,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
         fit_back_asset_id: fitBackId || current.fit_back_asset_id,
         scene_asset_id: sceneId || current.scene_asset_id,
       }));
-      if (productId || modelId || fitFrontId || fitSideId || fitBackId || sceneId) {
+      if (productId || modelId || fitFrontId || fitSideId || fitBackId || sceneId || accessoryId) {
         setWorkflow(null);
       }
       await refresh();
@@ -634,6 +638,24 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
     }
   };
 
+  const updateStepAccessoryRef = async (step, accessoryAssetId) => {
+    const currentRefs = step.input_refs || [];
+    const withoutAccessory = currentRefs.filter((ref) => !(ref.type === "asset" && assets.some((a) => a.id === ref.id && a.slot === "accessory_reference")));
+    const newRefs = accessoryAssetId ? [...withoutAccessory, { type: "asset", "id": accessoryAssetId }] : withoutAccessory;
+    setBusy(true);
+    try {
+      const updated = await request(`/api/projects/workflow/steps/${step.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ input_refs: newRefs }),
+      });
+      setWorkflow((current) => current ? { ...current, steps: (current.steps || []).map((s) => s.id === step.id ? { ...s, ...updated } : s) } : current);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const markKnowledgeCandidate = async (step) => {
     if (!step?.id || !step.url) return;
     setBusy(true);
@@ -690,6 +712,10 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
         <label className="stacked-field">
           <span>场景风格参考图</span>
           <input ref={sceneFileRef} type="file" accept="image/*" />
+        </label>
+        <label className="stacked-field">
+          <span>配饰参考图（可选）</span>
+          <input ref={accessoryFileRef} type="file" accept="image/*" />
         </label>
       </div>
       <button className="primary" disabled={busy} onClick={uploadRequiredAssets}>
@@ -809,6 +835,21 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
                     >
                       <option value="">无</option>
                       {assets.filter((a) => a.slot === "pose_reference").map((asset) => (
+                        <option key={asset.id} value={asset.id}>{asset.original_name}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+                {step.stage_id === "outfit" ? (
+                  <div className="step-pose-ref">
+                    <strong>配饰参考：</strong>
+                    <select
+                      value={(step.input_refs || []).find((ref) => ref.type === "asset" && assets.some((a) => a.id === ref.id && a.slot === "accessory_reference"))?.id || ""}
+                      onChange={(e) => updateStepAccessoryRef(step, e.target.value)}
+                      disabled={busy}
+                    >
+                      <option value="">无</option>
+                      {assets.filter((a) => a.slot === "accessory_reference").map((asset) => (
                         <option key={asset.id} value={asset.id}>{asset.original_name}</option>
                       ))}
                     </select>

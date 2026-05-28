@@ -129,13 +129,13 @@ def _angle_prompt(style_prompt: str) -> str:
 
 
 def _outfit_prompt(style_prompt: str) -> str:
-    return f"""重要：图1为已经确定好的场景模特图。保持图1中的人物身份、面部特征、发型、身材比例、产品穿着状态和场景风格，只在姿势与穿搭道具上做变化。
+    return f"""重要：图1为已经确定好的场景模特图。图2是穿搭配饰参考图。保持图1中的人物身份、面部特征、发型、身材比例、产品穿着状态和场景风格完全不变，只在姿势与穿搭道具上做变化。
 
-保持人物穿搭不变，随机生成1张正面角度的时下流行拍照姿势，突出产品特性手里提着包包/相机或者其他穿搭道具（可搭配其他颜色薄款夏季防晒衬衫需要露出产品，下装其他裙装裤装）风格统一，头看向一边露出迷人的微笑。画面中只能出现一个人物，禁止三宫格、拼图、多人同框或一次生成多张图。
+1.保持图1场景、人物当前服装不变，随机生成1张正面角度的时下流行拍照姿势，搭配图2的配饰、外套、妆容、墨镜、眼镜，风格与图1统一，画面中只能出现一个人物，禁止三宫格、拼图、多人同框或一次生成多张图。
 
-3.风格统一：严格遵循图1的摄影风格，包括色调（冷调/暖调/胶片感）、光影类型（自然光/柔光箱/逆光/侧光）、景深效果、画面质感
+2.风格统一：严格遵循图1的摄影风格，包括色调（冷调/暖调/胶片感）、光影类型（自然光/柔光箱/逆光/侧光）、景深效果、画面质感
 
-4.输出规格：{_half_body_spec(style_prompt)}"""
+3.输出规格：{_half_body_spec(style_prompt)}"""
 
 
 def _white_main_prompt(product_name: str, material: str, style_prompt: str) -> str:
@@ -233,6 +233,7 @@ def build_workflow_steps(
             "input_asset_ids": [],
             "input_step_ids": ["scene_model"],
             "input_refs": [{"type": "step", "id": "scene_model"}],
+            "accessory_slot": True,
         },
         {
             "stage_id": "white_main",
