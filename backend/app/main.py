@@ -854,7 +854,13 @@ def update_project_workflow_step(step_id: str, payload: DocxWorkflowStepUpdateIn
                     if asset["project_id"] != step["project_id"]:
                         raise HTTPException(400, f"素材 {ref_id} 不属于当前项目")
                 elif ref_type == "step":
-                    src_step = fetch_one(conn, "SELECT * FROM project_workflow_steps WHERE id = ?", (ref_id,))
+                    src_step = conn.execute(
+                        "SELECT * FROM project_workflow_steps WHERE id = ? OR (stage_id = ? AND project_id = ?)",
+                        (ref_id, ref_id, step["project_id"]),
+                    ).fetchone()
+                    if not src_step:
+                        raise HTTPException(404, f"步骤 {ref_id} 不存在")
+                    src_step = row_to_dict(src_step)
                     if src_step["project_id"] != step["project_id"]:
                         raise HTTPException(400, f"步骤 {ref_id} 不属于当前项目")
                 elif ref_type == "rag":
@@ -900,7 +906,10 @@ def generate_project_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn
                     input_paths.append(asset["file_path"])
         elif ref.get("type") == "step":
             with get_db() as conn:
-                src = conn.execute("SELECT * FROM project_workflow_steps WHERE id = ?", (ref["id"],)).fetchone()
+                src = conn.execute(
+                    "SELECT * FROM project_workflow_steps WHERE id = ? OR (stage_id = ? AND project_id = ?)",
+                    (ref["id"], ref["id"], project_id),
+                ).fetchone()
             if src:
                 src = row_to_dict(src)
                 if src.get("image_path") and Path(src["image_path"]).is_file():
