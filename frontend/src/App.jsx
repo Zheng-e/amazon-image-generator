@@ -2,7 +2,6 @@ import {
   Check,
   Database,
   FileImage,
-  ImagePlus,
   Plus,
   Search,
   Sparkles,
@@ -11,7 +10,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const API = import.meta.env.VITE_API_BASE || window.location.origin;
 
@@ -82,94 +81,6 @@ async function request(path, options = {}) {
     throw new Error(text || `HTTP ${res.status}`);
   }
   return res.json();
-}
-
-function AssetPanel({ project, assets, refresh }) {
-  const [assetType, setAssetType] = useState("product");
-  const [files, setFiles] = useState([]);
-  const [meta, setMeta] = useState({ source_url: "", asin: "", keyword: "", slot: "", notes: "" });
-  const grouped = useMemo(() => {
-    return assets.reduce((acc, asset) => {
-      acc[asset.asset_type] = [...(acc[asset.asset_type] || []), asset];
-      return acc;
-    }, {});
-  }, [assets]);
-
-  const deleteAsset = async (id) => {
-    if (!confirm("确认删除这张图片？")) return;
-    await request(`/api/assets/${id}`, { method: "DELETE" });
-    await refresh();
-  };
-
-  const upload = async () => {
-    if (!project || !files.length) return;
-    const form = new FormData();
-    form.append("project_id", project.id);
-    form.append("asset_type", assetType);
-    Object.entries(meta).forEach(([key, value]) => form.append(key, value));
-    files.forEach((file) => form.append("files", file));
-    await request("/api/assets", { method: "POST", body: form });
-    setFiles([]);
-    await refresh();
-  };
-
-  return (
-    <section className="panel">
-      <div className="section-title">
-        <ImagePlus size={18} />
-        <h2>素材上传</h2>
-      </div>
-      <div className="upload-bar">
-        <select value={assetType} onChange={(e) => setAssetType(e.target.value)}>
-          <option value="product">商品参考图</option>
-          <option value="model">模特参考图</option>
-          <option value="competitor">竞品图</option>
-        </select>
-        <input type="file" multiple accept="image/*" onChange={(e) => setFiles([...e.target.files])} />
-        <button className="primary" onClick={upload}>
-          <Upload size={16} />
-          上传
-        </button>
-      </div>
-      <div className="meta-grid">
-        <select value={meta.slot} onChange={(e) => setMeta({ ...meta, slot: e.target.value })}>
-          <option value="">素材用途（可选）</option>
-          <option value="product_image">产品图</option>
-          <option value="model_reference">模特面部及身材参考图</option>
-          <option value="fit_reference">衣服上身效果参考图</option>
-          <option value="scene_style_reference">场景风格参考图</option>
-        </select>
-        <input placeholder="关键词/标签" value={meta.keyword} onChange={(e) => setMeta({ ...meta, keyword: e.target.value })} />
-        <input placeholder="来源 URL/ASIN" value={meta.source_url} onChange={(e) => setMeta({ ...meta, source_url: e.target.value })} />
-        <input placeholder="备注" value={meta.notes} onChange={(e) => setMeta({ ...meta, notes: e.target.value })} />
-      </div>
-      <div className="asset-columns">
-        {["product", "model", "competitor"].map((type) => (
-          <div key={type}>
-            <h3>{type === "product" ? "商品图" : type === "model" ? "模特图" : "竞品图"}</h3>
-            <div className="asset-grid">
-              {(grouped[type] || []).map((asset) => (
-                <figure key={asset.id}>
-                  {asset.url ? (
-                    <img src={`${API}${asset.url}`} alt={asset.original_name} />
-                  ) : (
-                    <div className="asset-missing">文件缺失<br />请删除后重新上传</div>
-                  )}
-                  <figcaption title={asset.original_name}>
-                    {asset.original_name}
-                    {asset.slot ? <small>{asset.slot}</small> : null}
-                  </figcaption>
-                  <button className="icon-btn danger figure-del" title="删除" onClick={() => deleteAsset(asset.id)}>
-                    <Trash2 size={12} />
-                  </button>
-                </figure>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
 }
 
 function RagKnowledgeWorkbench({ project, refreshProject }) {
@@ -397,6 +308,7 @@ const DOCX_SLOT_TYPES = {
   model_reference: ["model"],
   fit_reference: ["competitor"],
   scene_style_reference: ["competitor"],
+  pose_reference: ["competitor"],
 };
 
 const DOCX_SLOT_LABELS = {
@@ -404,6 +316,7 @@ const DOCX_SLOT_LABELS = {
   model_reference: "模特参考",
   fit_reference: "上身效果参考",
   scene_style_reference: "场景风格参考",
+  pose_reference: "姿势参考",
 };
 
 function docxAssetsForSlot(assets, slotHint) {
@@ -455,6 +368,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
     model_asset_id: "",
     fit_asset_id: "",
     scene_asset_id: "",
+    pose_asset_id: "",
   });
   const [workflow, setWorkflow] = useState(null);
   const [promptDrafts, setPromptDrafts] = useState({});
@@ -464,6 +378,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
   const modelFileRef = useRef(null);
   const fitFileRef = useRef(null);
   const sceneFileRef = useRef(null);
+  const poseFileRef = useRef(null);
 
   useEffect(() => {
     request("/api/docx-workflow/styles").then(setStyles).catch(() => setStyles([]));
@@ -486,6 +401,24 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
       drafts[step.id] = step.prompt || "";
     });
     setPromptDrafts(drafts);
+  }, [workflow]);
+
+  useEffect(() => {
+    if (!workflow) return;
+    setForm((current) => ({
+      ...current,
+      product_name: current.product_name || workflow.product_name || "",
+      material: current.material || workflow.material || "",
+      style_key: current.style_key || workflow.style_key || "natural_fashion",
+      image_model: current.image_model || workflow.image_model || "gpt-image-2-client",
+      size: current.size || workflow.size || "1024x1024",
+      quality: current.quality || workflow.quality || "high",
+      product_asset_id: current.product_asset_id || workflow.product_asset_id || "",
+      model_asset_id: current.model_asset_id || workflow.model_asset_id || "",
+      fit_asset_id: current.fit_asset_id || workflow.fit_asset_id || "",
+      scene_asset_id: current.scene_asset_id || workflow.scene_asset_id || "",
+      pose_asset_id: current.pose_asset_id || workflow.pose_asset_id || "",
+    }));
   }, [workflow]);
 
   useEffect(() => {
@@ -520,7 +453,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
   const initWorkflow = async () => {
     return request(`/api/projects/${project.id}/workflow`, {
       method: "POST",
-      body: JSON.stringify({ ...form }),
+      body: JSON.stringify({ ...form, project_id: project.id }),
     });
   };
 
@@ -541,11 +474,12 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
   const uploadRequiredAssets = async () => {
     setBusy(true);
     try {
-      const [productId, modelId, fitId, sceneId] = await Promise.all([
-        uploadOne(productFileRef, "product", "product_image", "DOCX流程：产品图"),
-        uploadOne(modelFileRef, "model", "model_reference", "DOCX流程：模特面部及身材参考图"),
-        uploadOne(fitFileRef, "competitor", "fit_reference", "DOCX流程：衣服上身效果参考图"),
-        uploadOne(sceneFileRef, "competitor", "scene_style_reference", "DOCX流程：场景风格参考图"),
+      const [productId, modelId, fitId, sceneId, poseId] = await Promise.all([
+        uploadOne(productFileRef, "product", "product_image", "固定九图流程：产品图"),
+        uploadOne(modelFileRef, "model", "model_reference", "固定九图流程：模特面部及身材参考图"),
+        uploadOne(fitFileRef, "competitor", "fit_reference", "固定九图流程：衣服上身效果参考图"),
+        uploadOne(sceneFileRef, "competitor", "scene_style_reference", "固定九图流程：场景风格参考图"),
+        uploadOne(poseFileRef, "competitor", "pose_reference", "固定九图流程：姿势参考图"),
       ]);
       setForm((current) => ({
         ...current,
@@ -553,7 +487,11 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
         model_asset_id: modelId || current.model_asset_id,
         fit_asset_id: fitId || current.fit_asset_id,
         scene_asset_id: sceneId || current.scene_asset_id,
+        pose_asset_id: poseId || current.pose_asset_id,
       }));
+      if (productId || modelId || fitId || sceneId || poseId) {
+        setWorkflow(null);
+      }
       await refresh();
     } finally {
       setBusy(false);
@@ -581,6 +519,8 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
       const detailed = await request(`/api/projects/${project.id}/workflow/preview`, { method: "POST" });
       setWorkflow(detailed);
       await refresh();
+    } catch (err) {
+      alert(err.message);
     } finally {
       setBusy(false);
     }
@@ -618,7 +558,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
       const blob = await res.blob();
       const disposition = res.headers.get("Content-Disposition") || "";
       const match = disposition.match(/filename="([^"]+)"/);
-      const filename = match?.[1] || `${project.sku || "docx"}_images.zip`;
+      const filename = match?.[1] || `${project.sku || "固定九图流程"}_images.zip`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -699,7 +639,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
     <section className="panel docx-workflow-panel">
       <div className="section-title">
         <FileImage size={18} />
-        <h2>DOCX 固定九图流程</h2>
+        <h2>固定九图流程</h2>
       </div>
       <div className="docx-upload-grid">
         <label className="stacked-field">
@@ -718,10 +658,14 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
           <span>场景风格参考图</span>
           <input ref={sceneFileRef} type="file" accept="image/*" />
         </label>
+        <label className="stacked-field">
+          <span>姿势参考图（可选）</span>
+          <input ref={poseFileRef} type="file" accept="image/*" />
+        </label>
       </div>
       <button className="primary" disabled={busy} onClick={uploadRequiredAssets}>
         <Upload size={16} />
-        上传并填入四张参考图
+        上传并填入参考图
       </button>
       <div className="docx-config-grid">
         <label className="stacked-field">
@@ -777,6 +721,16 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
         <DocxAssetSelect label="模特面部及身材参考图" assets={assets} slotHint="model_reference" value={form.model_asset_id} onChange={(value) => setForm({ ...form, model_asset_id: value })} />
         <DocxAssetSelect label="衣服上身效果参考图" assets={assets} slotHint="fit_reference" value={form.fit_asset_id} onChange={(value) => setForm({ ...form, fit_asset_id: value })} />
         <DocxAssetSelect label="场景风格参考图" assets={assets} slotHint="scene_style_reference" value={form.scene_asset_id} onChange={(value) => setForm({ ...form, scene_asset_id: value })} />
+        <DocxAssetSelect
+          label="姿势参考图（可选）"
+          assets={assets}
+          slotHint="pose_reference"
+          value={form.pose_asset_id}
+          onChange={(value) => {
+            setForm({ ...form, pose_asset_id: value });
+            setWorkflow(null);
+          }}
+        />
       </div>
       <div className="docx-actions">
         <button className="primary" disabled={!ready || busy} onClick={preview}>
@@ -1043,7 +997,7 @@ export default function App() {
       <div className="app-shell">
         <header>
           <div>
-            <h1>DOCX 固定九图自动化生图流程</h1>
+            <h1>固定九图自动化生图流程</h1>
             <p>请先选择或创建一个用户。</p>
           </div>
         </header>
@@ -1067,7 +1021,7 @@ export default function App() {
       <div className="app-shell">
         <header>
           <div>
-            <h1>DOCX 固定九图自动化生图流程</h1>
+            <h1>固定九图自动化生图流程</h1>
             <p>当前用户：{selectedUser?.name}。选择或创建一个项目。</p>
           </div>
         </header>
@@ -1101,7 +1055,6 @@ export default function App() {
       <main className="no-sidebar">
         {selectedProject && projectDetail ? (
           <div className="workspace">
-            <AssetPanel project={selectedProject} assets={assets} refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
             <RagKnowledgeWorkbench project={selectedProject} refreshProject={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
             <DocxWorkflowPanel project={selectedProject} assets={assets} refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} onDownload={() => loadProjects(selectedUser.id)} />
           </div>
