@@ -529,11 +529,12 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
   };
 
   const savePrompt = async (stepId, prompt) => {
-    const updated = await request(`/api/projects/workflow/steps/${stepId}`, {
+    const pkg = await request(`/api/projects/workflow/steps/${stepId}`, {
       method: "PATCH",
       body: JSON.stringify({ prompt }),
     });
-    setWorkflow((current) => current ? { ...current, steps: (current.steps || []).map((step) => step.id === stepId ? { ...step, ...updated } : step) } : current);
+    const updatedStep = (pkg.steps || []).find((s) => s.id === stepId);
+    setWorkflow((current) => current ? { ...current, steps: (current.steps || []).map((step) => step.id === stepId ? { ...step, ...(updatedStep || {}) } : step) } : current);
   };
 
   const saveAllPrompts = async () => {
@@ -648,11 +649,12 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
     const newRefs = poseAssetId ? [...withoutPose, { type: "asset", id: poseAssetId }] : withoutPose;
     setBusy(true);
     try {
-      const updated = await request(`/api/projects/workflow/steps/${stepId}`, {
+      const pkg = await request(`/api/projects/workflow/steps/${stepId}`, {
         method: "PATCH",
         body: JSON.stringify({ input_refs: newRefs }),
       });
-      setWorkflow((current) => current ? { ...current, steps: (current.steps || []).map((s) => s.id === stepId ? { ...s, ...updated } : s) } : current);
+      const updatedStep = (pkg.steps || []).find((s) => s.id === stepId);
+      setWorkflow((current) => current ? { ...current, steps: (current.steps || []).map((s) => s.id === stepId ? { ...s, ...(updatedStep || {}) } : s) } : current);
     } catch (err) {
       alert(err.message);
     } finally {
