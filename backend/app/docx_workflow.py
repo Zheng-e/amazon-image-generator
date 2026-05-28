@@ -194,9 +194,16 @@ def build_workflow_steps(
     model_asset_id: str,
     fit_asset_id: str,
     scene_asset_id: str,
+    pose_asset_id: str = "",
 ) -> list[dict[str, Any]]:
     style_prompt = STYLE_OPTIONS[style_key]["prompt"]
     angle_prompt = _angle_prompt(style_prompt)
+    angle_refs = [
+        {"type": "step", "id": "scene_model"},
+        {"type": "step", "id": "model_on_body"},
+    ]
+    if pose_asset_id:
+        angle_refs.append({"type": "asset", "id": pose_asset_id})
     return [
         {
             "stage_id": "model_on_body",
@@ -232,12 +239,9 @@ def build_workflow_steps(
                 "generation_order": image_no,
                 "title": f"第{image_no}张：正侧背其他角度图",
                 "prompt": angle_prompt,
-                "input_asset_ids": [],
+                "input_asset_ids": [pose_asset_id] if pose_asset_id else [],
                 "input_step_ids": ["scene_model", "model_on_body"],
-                "input_refs": [
-                    {"type": "step", "id": "scene_model"},
-                    {"type": "step", "id": "model_on_body"},
-                ],
+                "input_refs": [dict(ref) for ref in angle_refs],
             }
             for image_no in range(3, 7)
         ],

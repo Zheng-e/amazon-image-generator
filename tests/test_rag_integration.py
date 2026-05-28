@@ -81,6 +81,66 @@ def test_select_stage_references_filters_by_stage_tags_and_limits_to_three():
     assert len(selected) == 3
 
 
+def test_angle_stage_uses_single_pose_reference_as_image_three():
+    steps = [
+        {
+            "stage_id": "angle_3",
+            "title": "第3张：正侧背其他角度图",
+            "prompt": "角度提示词：图1场景模特图，图2模特上身3视图，图3姿势参考图",
+            "input_refs": [
+                {"type": "step", "id": "scene_model"},
+                {"type": "step", "id": "model_on_body"},
+            ],
+            "input_asset_ids": [],
+            "input_step_ids": ["scene_model", "model_on_body"],
+        }
+    ]
+    refs = [
+        make_reference("composition", ["composition_reference"], score=0.99, sort_order=0),
+        make_reference("pose", ["pose_reference"], score=0.5, sort_order=1),
+        make_reference("pose-extra", ["pose_reference"], score=0.4, sort_order=2),
+    ]
+
+    enriched = enrich_docx_steps_with_rag(steps, refs)
+
+    assert enriched[0]["input_refs"] == [
+        {"type": "step", "id": "scene_model"},
+        {"type": "step", "id": "model_on_body"},
+        {"type": "rag", "id": "pose"},
+    ]
+    assert "图3：知识库参考图" in enriched[0]["prompt"]
+    assert "姿势参考" in enriched[0]["prompt"]
+    assert "composition" not in enriched[0]["prompt"]
+
+
+def test_angle_stage_with_uploaded_pose_asset_does_not_add_rag_pose_reference():
+    steps = [
+        {
+            "stage_id": "angle_3",
+            "title": "第3张：正侧背其他角度图",
+            "prompt": "角度提示词：图1场景模特图，图2模特上身3视图，图3姿势参考图",
+            "input_refs": [
+                {"type": "step", "id": "scene_model"},
+                {"type": "step", "id": "model_on_body"},
+                {"type": "asset", "id": "uploaded-pose"},
+            ],
+            "input_asset_ids": ["uploaded-pose"],
+            "input_step_ids": ["scene_model", "model_on_body"],
+        }
+    ]
+    refs = [make_reference("rag-pose", ["pose_reference"], score=0.9, sort_order=0)]
+
+    enriched = enrich_docx_steps_with_rag(steps, refs)
+
+    assert enriched[0]["input_refs"] == [
+        {"type": "step", "id": "scene_model"},
+        {"type": "step", "id": "model_on_body"},
+        {"type": "asset", "id": "uploaded-pose"},
+    ]
+    assert RAG_CONTEXT_BLOCK_START not in enriched[0]["prompt"]
+    assert "rag-pose" not in enriched[0]["prompt"]
+
+
 def test_enrich_docx_steps_adds_structured_context_block():
     steps = [
         {
@@ -166,6 +226,12 @@ def test_predicted_steps_for_white_main_reference():
     image_nos = [s["image_no"] for s in steps]
     assert 8 in image_nos
     assert 9 in image_nos
+
+
+def test_predicted_steps_for_composition_reference_only_targets_white_images():
+    steps = predicted_steps_for_usage_tags(["composition_reference"])
+    image_nos = [s["image_no"] for s in steps]
+    assert image_nos == [8, 9]
 
 
 def test_predicted_steps_merges_multiple_tags():

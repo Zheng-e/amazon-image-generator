@@ -105,6 +105,7 @@ def init_db() -> None:
                 model_asset_id TEXT DEFAULT '',
                 fit_asset_id TEXT DEFAULT '',
                 scene_asset_id TEXT DEFAULT '',
+                pose_asset_id TEXT DEFAULT '',
                 image_model TEXT NOT NULL DEFAULT '',
                 size TEXT NOT NULL DEFAULT '1024x1024',
                 quality TEXT NOT NULL DEFAULT 'high',
@@ -279,6 +280,7 @@ def init_db() -> None:
                 model_asset_id TEXT NOT NULL,
                 fit_asset_id TEXT NOT NULL,
                 scene_asset_id TEXT NOT NULL,
+                pose_asset_id TEXT DEFAULT '',
                 image_model TEXT DEFAULT '',
                 size TEXT NOT NULL DEFAULT '1024x1024',
                 quality TEXT NOT NULL DEFAULT 'high',
@@ -402,6 +404,8 @@ def migrate_existing_db(conn: sqlite3.Connection) -> None:
     run_columns = table_columns(conn, "docx_workflow_runs")
     if run_columns and "downloaded_at" not in run_columns:
         conn.execute("ALTER TABLE docx_workflow_runs ADD COLUMN downloaded_at TEXT DEFAULT ''")
+    if run_columns and "pose_asset_id" not in run_columns:
+        conn.execute("ALTER TABLE docx_workflow_runs ADD COLUMN pose_asset_id TEXT DEFAULT ''")
     # Project-level workflow fields
     project_cols = table_columns(conn, "projects")
     for col, definition in [
@@ -412,6 +416,7 @@ def migrate_existing_db(conn: sqlite3.Connection) -> None:
         ("model_asset_id", "TEXT DEFAULT ''"),
         ("fit_asset_id", "TEXT DEFAULT ''"),
         ("scene_asset_id", "TEXT DEFAULT ''"),
+        ("pose_asset_id", "TEXT DEFAULT ''"),
         ("image_model", "TEXT NOT NULL DEFAULT ''"),
         ("size", "TEXT NOT NULL DEFAULT '1024x1024'"),
         ("quality", "TEXT NOT NULL DEFAULT 'high'"),

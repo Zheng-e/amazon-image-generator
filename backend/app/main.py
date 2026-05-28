@@ -102,7 +102,7 @@ class ProjectIn(BaseModel):
 
 
 class DocxWorkflowRunIn(BaseModel):
-    project_id: str
+    project_id: str = ""
     product_name: str
     material: str
     style_key: str = "natural_fashion"
@@ -110,6 +110,7 @@ class DocxWorkflowRunIn(BaseModel):
     model_asset_id: str
     fit_asset_id: str
     scene_asset_id: str
+    pose_asset_id: str = ""
     image_model: str | None = None
     size: str = "1024x1024"
     quality: str = "high"
@@ -243,6 +244,14 @@ def rag_ref_ids(refs: list[dict[str, str]]) -> list[str]:
     return [ref["id"] for ref in refs if ref.get("type") == "rag"]
 
 
+def project_image_response_to_bytes(result: dict[str, Any]) -> tuple[bytes, dict[str, Any]]:
+    b64_json = result.get("b64_json")
+    if not b64_json:
+        raise RuntimeError(f"Image model returned no b64_json: {str(result)[:500]}")
+    params = {key: value for key, value in result.items() if key != "b64_json"}
+    return base64.b64decode(str(b64_json)), params
+
+
 def fetch_one(conn, query: str, params: tuple = ()) -> dict:
     row = conn.execute(query, params).fetchone()
     data = row_to_dict(row)
@@ -308,6 +317,7 @@ def fetch_project_workflow_package(conn: sqlite3.Connection, project_id: str) ->
         "model_asset_id": project.get("model_asset_id", ""),
         "fit_asset_id": project.get("fit_asset_id", ""),
         "scene_asset_id": project.get("scene_asset_id", ""),
+        "pose_asset_id": project.get("pose_asset_id", ""),
     }
     steps = attach_docx_reference_items(conn, pseudo_run, steps)
     return {
@@ -315,6 +325,11 @@ def fetch_project_workflow_package(conn: sqlite3.Connection, project_id: str) ->
         "product_name": project.get("product_name", ""),
         "material": project.get("material", ""),
         "style_key": project.get("style_key", ""),
+        "product_asset_id": project.get("product_asset_id", ""),
+        "model_asset_id": project.get("model_asset_id", ""),
+        "fit_asset_id": project.get("fit_asset_id", ""),
+        "scene_asset_id": project.get("scene_asset_id", ""),
+        "pose_asset_id": project.get("pose_asset_id", ""),
         "image_model": project.get("image_model", ""),
         "size": project.get("size", "1024x1024"),
         "quality": project.get("quality", "high"),
@@ -426,6 +441,8 @@ def validate_docx_workflow_input(conn, payload: DocxWorkflowRunIn) -> list[dict]
         payload.fit_asset_id,
         payload.scene_asset_id,
     ]
+    if payload.pose_asset_id:
+        asset_ids.append(payload.pose_asset_id)
     assets = get_assets_by_ids(conn, list(dict.fromkeys(asset_ids)))
     found = {asset["id"]: asset for asset in assets}
     missing = [asset_id for asset_id in asset_ids if asset_id not in found]
@@ -449,6 +466,7 @@ def insert_docx_workflow_steps(conn, run_id: str, payload: DocxWorkflowRunIn) ->
         model_asset_id=payload.model_asset_id,
         fit_asset_id=payload.fit_asset_id,
         scene_asset_id=payload.scene_asset_id,
+        pose_asset_id=payload.pose_asset_id,
     )
     rag_references = get_rag_references_for_project(conn, payload.project_id)
     steps = enrich_docx_steps_with_rag(steps, rag_references)
@@ -492,21 +510,13 @@ def insert_project_workflow_steps(conn: sqlite3.Connection, project_id: str, pay
         model_asset_id=payload.model_asset_id,
         fit_asset_id=payload.fit_asset_id,
         scene_asset_id=payload.scene_asset_id,
+        pose_asset_id=getattr(payload, "pose_asset_id", ""),
     )
     rag_references = get_rag_references_for_project(conn, project_id)
     steps = enrich_docx_steps_with_rag(steps, rag_references)
     for step_def in steps:
         step_id = new_id()
         refs = step_def.get("input_refs") or []
-        for asset_col, ref_type in [
-            ("product_asset_id", "product_image"),
-            ("model_asset_id", "model_reference"),
-            ("fit_asset_id", "fit_reference"),
-            ("scene_asset_id", "scene_style_reference"),
-        ]:
-            asset_id = getattr(payload, asset_col, "") or ""
-            if asset_id and not any(r.get("id") == asset_id for r in refs):
-                refs.append({"type": "asset", "id": asset_id})
         conn.execute(
             """INSERT INTO project_workflow_steps
                (id, project_id, stage_id, image_no, generation_order, title, prompt,
@@ -643,8 +653,8 @@ def create_docx_workflow_run(payload: DocxWorkflowRunIn) -> dict:
             """
             INSERT INTO docx_workflow_runs
             (id, project_id, product_name, material, style_key, product_asset_id, model_asset_id,
-             fit_asset_id, scene_asset_id, image_model, size, quality, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             fit_asset_id, scene_asset_id, pose_asset_id, image_model, size, quality, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
@@ -656,6 +666,7 @@ def create_docx_workflow_run(payload: DocxWorkflowRunIn) -> dict:
                 payload.model_asset_id,
                 payload.fit_asset_id,
                 payload.scene_asset_id,
+                payload.pose_asset_id,
                 payload.image_model or "",
                 payload.size,
                 payload.quality,
@@ -1179,9 +1190,17 @@ def _run_project_workflow_in_background(project_id: str, image_model: str | None
                 stage_id = re.sub(r"[^A-Za-z0-9_-]+", "_", step.get("stage_id") or "image").strip("_")
                 filename = f"{int(step.get('image_no') or 0):02d}_{stage_id}.png"
                 out_path = step_dir / filename
+                image_bytes, response_params = project_image_response_to_bytes(result)
                 with open(out_path, "wb") as f:
-                    f.write(result["image_bytes"])
-                params = {k: v for k, v in result.items() if k != "image_bytes"}
+                    f.write(image_bytes)
+                params = {
+                    "size": size,
+                    "quality": quality,
+                    "image_model": response_params.get("model") or image_model or "",
+                    "image_api_type": response_params.get("api_type") or "",
+                    **reference_ids_by_type(refs),
+                    **(response_params.get("params") or {}),
+                }
                 with get_db() as conn:
                     conn.execute(
                         "UPDATE project_workflow_steps SET status = 'success', image_path = ?, params_json = ?, error = '', updated_at = ? WHERE id = ?",
@@ -1338,20 +1357,21 @@ def list_all_docx_runs(
 
 @app.post("/api/projects/{project_id}/workflow")
 def init_project_workflow(project_id: str, payload: DocxWorkflowRunIn) -> dict:
+    payload.project_id = project_id
     with get_db() as conn:
         project = fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))
         validated = validate_docx_workflow_input(conn, payload)
         conn.execute(
             """UPDATE projects SET
                product_name = ?, material = ?, style_key = ?,
-               product_asset_id = ?, model_asset_id = ?, fit_asset_id = ?, scene_asset_id = ?,
+               product_asset_id = ?, model_asset_id = ?, fit_asset_id = ?, scene_asset_id = ?, pose_asset_id = ?,
                image_model = ?, size = ?, quality = ?,
                workflow_status = 'idle', workflow_error = '', updated_at = ?
                WHERE id = ?""",
             (
                 payload.product_name, payload.material, payload.style_key,
                 payload.product_asset_id, payload.model_asset_id,
-                payload.fit_asset_id, payload.scene_asset_id,
+                payload.fit_asset_id, payload.scene_asset_id, payload.pose_asset_id,
                 payload.image_model or "", payload.size, payload.quality,
                 now_iso(), project_id,
             ),
@@ -1541,9 +1561,17 @@ def generate_project_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn
         stage_id = re.sub(r"[^A-Za-z0-9_-]+", "_", step.get("stage_id") or "image").strip("_")
         filename = f"{int(step.get('image_no') or 0):02d}_{stage_id}.png"
         out_path = step_dir / filename
+        image_bytes, response_params = project_image_response_to_bytes(result)
         with open(out_path, "wb") as f:
-            f.write(result["image_bytes"])
-        params = {k: v for k, v in result.items() if k != "image_bytes"}
+            f.write(image_bytes)
+        params = {
+            "size": size,
+            "quality": quality,
+            "image_model": response_params.get("model") or image_model or "",
+            "image_api_type": response_params.get("api_type") or "",
+            **reference_ids_by_type(refs),
+            **(response_params.get("params") or {}),
+        }
         with get_db() as conn:
             conn.execute(
                 "UPDATE project_workflow_steps SET status = 'success', image_path = ?, params_json = ?, error = '', updated_at = ? WHERE id = ?",

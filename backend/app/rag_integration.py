@@ -52,7 +52,7 @@ USAGE_TAG_STAGE_MAP: dict[str, list[str]] = {
     "scene_reference": ["scene_model"],
     "color_reference": ["scene_model", "outfit"],
     "pose_reference": ["angle_3", "angle_4", "angle_5", "angle_6", "outfit"],
-    "composition_reference": ["angle_3", "angle_4", "angle_5", "angle_6", "white_main", "white_back"],
+    "composition_reference": ["white_main", "white_back"],
     "white_main_reference": ["white_main", "white_back"],
 }
 
@@ -226,7 +226,7 @@ def apply_rag_context_to_prompt(prompt: str, input_refs: list[dict[str, str]], r
 
 def stage_usage_tags(stage_id: str) -> set[str]:
     if stage_id.startswith("angle_"):
-        return {"pose_reference", "composition_reference"}
+        return {"pose_reference"}
     return STAGE_USAGE_TAGS.get(stage_id, set())
 
 
@@ -234,6 +234,8 @@ def select_stage_references(stage_id: str, references: list[dict[str, Any]], max
     desired_tags = stage_usage_tags(stage_id)
     if not desired_tags:
         return []
+    if stage_id.startswith("angle_"):
+        max_items = 1
 
     def has_desired_tag(item: dict[str, Any]) -> bool:
         tags = item.get("usage_tags") or item.get("usage_tags_json") or []
@@ -255,8 +257,10 @@ def enrich_docx_steps_with_rag(steps: list[dict[str, Any]], references: list[dic
     enriched: list[dict[str, Any]] = []
     for step in steps:
         updated = dict(step)
+        stage_id = str(updated.get("stage_id") or "")
         refs = [dict(item) for item in (updated.get("input_refs") or [])]
-        selected = select_stage_references(str(updated.get("stage_id") or ""), references)
+        has_uploaded_angle_pose = stage_id.startswith("angle_") and any(ref.get("type") == "asset" for ref in refs)
+        selected = [] if has_uploaded_angle_pose else select_stage_references(stage_id, references)
         if selected:
             existing = {(item.get("type"), item.get("id")) for item in refs}
             for item in selected:
