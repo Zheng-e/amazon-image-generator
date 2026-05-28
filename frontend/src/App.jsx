@@ -459,7 +459,9 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
     form.fit_front_asset_id &&
     form.fit_side_asset_id &&
     form.fit_back_asset_id &&
-    form.scene_asset_id;
+    form.scene_asset_id &&
+    form.accessory_asset_id &&
+    assets.some((a) => a.slot === "pose_reference");
 
   const initWorkflow = async () => {
     return request(`/api/projects/${project.id}/workflow`, {
@@ -517,7 +519,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
         }
         poseFileRef.current.value = "";
       }
-      if (productId || modelId || fitFrontId || fitSideId || fitBackId || sceneId || accessoryId || (poseFiles?.length)) {
+      if (productId || modelId || fitFrontId || fitSideId || fitBackId || sceneId || accessoryId) {
         setWorkflow(null);
       }
       await refresh();
@@ -637,17 +639,20 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
     }
   };
 
-  const updateStepPoseRef = async (step, poseAssetId) => {
-    const currentRefs = step.input_refs || [];
+  const updateStepPoseRef = async (stepId, poseAssetId) => {
+    if (!workflow?.steps) return;
+    const currentStep = workflow.steps.find((s) => s.id === stepId);
+    if (!currentStep) return;
+    const currentRefs = currentStep.input_refs || [];
     const withoutPose = currentRefs.filter((ref) => !(ref.type === "asset" && assets.some((a) => a.id === ref.id && a.slot === "pose_reference")));
     const newRefs = poseAssetId ? [...withoutPose, { type: "asset", id: poseAssetId }] : withoutPose;
     setBusy(true);
     try {
-      const updated = await request(`/api/projects/workflow/steps/${step.id}`, {
+      const updated = await request(`/api/projects/workflow/steps/${stepId}`, {
         method: "PATCH",
         body: JSON.stringify({ input_refs: newRefs }),
       });
-      setWorkflow((current) => current ? { ...current, steps: (current.steps || []).map((s) => s.id === step.id ? { ...s, ...updated } : s) } : current);
+      setWorkflow((current) => current ? { ...current, steps: (current.steps || []).map((s) => s.id === stepId ? { ...s, ...updated } : s) } : current);
     } catch (err) {
       alert(err.message);
     } finally {
@@ -713,11 +718,11 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
           <input ref={sceneFileRef} type="file" accept="image/*" />
         </label>
         <label className="stacked-field">
-          <span>配饰参考图（可选）</span>
+          <span>配饰参考图</span>
           <input ref={accessoryFileRef} type="file" accept="image/*" />
         </label>
         <label className="stacked-field">
-          <span>姿势参考图（可选，可多选）</span>
+          <span>姿势参考图（可多选）</span>
           <input ref={poseFileRef} type="file" accept="image/*" multiple />
         </label>
       </div>
@@ -725,6 +730,19 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
         <Upload size={16} />
         上传并填入参考图
       </button>
+      {assets.filter((a) => a.slot === "pose_reference").length ? (
+        <div className="pose-preview">
+          <strong>已上传姿势参考图：</strong>
+          <div className="pose-preview-list">
+            {assets.filter((a) => a.slot === "pose_reference").map((asset) => (
+              <figure key={asset.id} className="pose-preview-item">
+                <img src={`${API}${asset.url}`} alt={asset.original_name} />
+                <figcaption>{asset.original_name}</figcaption>
+              </figure>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="docx-config-grid">
         <label className="stacked-field">
           <span>产品名称</span>
@@ -781,7 +799,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
         <DocxAssetSelect label="衣服上身效果侧面参考图" assets={assets} slotHint="fit_side_reference" value={form.fit_side_asset_id} onChange={(value) => setForm({ ...form, fit_side_asset_id: value })} />
         <DocxAssetSelect label="衣服上身效果背面参考图" assets={assets} slotHint="fit_back_reference" value={form.fit_back_asset_id} onChange={(value) => setForm({ ...form, fit_back_asset_id: value })} />
         <DocxAssetSelect label="场景风格参考图" assets={assets} slotHint="scene_style_reference" value={form.scene_asset_id} onChange={(value) => setForm({ ...form, scene_asset_id: value })} />
-        <DocxAssetSelect label="配饰参考图（可选）" assets={assets} slotHint="accessory_reference" value={form.accessory_asset_id} onChange={(value) => { setForm({ ...form, accessory_asset_id: value }); setWorkflow(null); }} />
+        <DocxAssetSelect label="配饰参考图" assets={assets} slotHint="accessory_reference" value={form.accessory_asset_id} onChange={(value) => { setForm({ ...form, accessory_asset_id: value }); setWorkflow(null); }} />
       </div>
       <div className="docx-actions">
         <button className="primary" disabled={!ready || busy} onClick={preview}>
@@ -834,8 +852,8 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
                     <strong>姿势参考：</strong>
                     <select
                       value={(step.input_refs || []).find((ref) => ref.type === "asset" && assets.some((a) => a.id === ref.id && a.slot === "pose_reference"))?.id || ""}
-                      onChange={(e) => updateStepPoseRef(step, e.target.value)}
-                      disabled={busy}
+                      onChange={(e) => updateStepPoseRef(step.id, e.target.value)}
+                      disabled={!workflow || busy}
                     >
                       <option value="">无</option>
                       {assets.filter((a) => a.slot === "pose_reference").map((asset) => (

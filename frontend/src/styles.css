@@ -895,6 +895,50 @@ figcaption small {
   padding: 4px 6px;
 }
 
+.pose-preview {
+  margin-top: 8px;
+  padding: 8px;
+  background: #fefce8;
+  border-radius: 6px;
+  border: 1px solid #fde68a;
+}
+
+.pose-preview strong {
+  font-size: 12px;
+  color: #92400e;
+  display: block;
+  margin-bottom: 6px;
+}
+
+.pose-preview-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pose-preview-item {
+  width: 80px;
+  margin: 0;
+}
+
+.pose-preview-item img {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+}
+
+.pose-preview-item figcaption {
+  font-size: 10px;
+  color: #64748b;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 2px;
+}
+
 .step-rag-refs strong {
   font-size: 12px;
   color: #334155;
