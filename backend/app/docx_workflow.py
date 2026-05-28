@@ -140,54 +140,28 @@ def _outfit_prompt(style_prompt: str) -> str:
 
 def _white_main_prompt(product_name: str, material: str, style_prompt: str) -> str:
     desc = product_description(product_name, material)
-    return f"""重要：请严格按图片编号理解参考图。图1为产品模特上身3视图，只参考同一位模特和正面穿着状态；图2为原始产品图，只参考产品颜色、材质、版型结构和设计细节。
+    return f"""重要：请严格按图片编号理解参考图，不能互换。图1只代表场景模特服装图，图2只代表正侧背款式参考，图3只代表姿势参考。
 
-图1为我的产品模特上身3视图
-图2为我的原始产品图
+图1为我的场景模特服装图
 
-提示词：
+图2为我的正侧背款式参考
 
-为这款（{desc}）生成符合亚马逊规范的白底主图。
+图3为我的姿势参考
 
-要求：
-
-1.画面目标不是时尚人像，而是亚马逊服装主图。必须正面展示产品，人物只作为穿着载体，允许裁掉完整脸部、头发、腿部和多余身体区域。
-
-2.构图必须为近距离商品特写：画面裁切范围优先为锁骨/下巴以下至衣服下摆附近，只保留必要肩颈、手臂边缘和少量下装边缘。产品主体必须居中，产品在整张图中的视觉占比达到85%-90%。
-
-3.产品必须完整、清晰、无变形地穿在模特身上，严格保留图2原始产品的白色、材质纹理、版型结构、双层效果、吊带细节和所有设计细节。
-
-4.手、头发、配饰、包、杯子、外套、衬衫、道具不得遮挡产品，不得添加多余搭配，不得出现品牌logo、水印、文字。
-
-5.背景必须为纯白底（RGB255,255,255），无阴影杂色、无街头、无户外、无室内生活场景、无地面墙面、无路人或额外人物。
-
-6.输出规格：亚马逊电商主图，真实棚拍质感，产品边缘清晰，面料纹理可见，高清商业摄影，未过度磨皮，画面比例3:4。"""
+图片要求：为这款{desc}生成白底主图。人物姿势100%参考图3，严格保留图1模特面部特征、五官比例、肤色、发型、身材轮廓，严格保留图2服装的颜色、材质纹理、版型结构、所有设计细节不随意发挥。构图近距离特写（锁骨至胯部，露出下装），产品居中占比85%-90%。背景纯白（RGB255,255,255），无阴影杂色。使用哈苏Hasselblad 100mm镜头拍摄，自然肤质，毛孔清晰可见，不过度磨皮。输出规格：亚马逊电商主图，高清商业摄影，画面比例3:4。"""
 
 
 def _white_back_prompt(product_name: str, material: str, style_prompt: str) -> str:
     desc = product_description(product_name, material)
-    return f"""重要：请严格按图片编号理解参考图。图1为产品模特上身3视图，只参考同一位模特和背面/侧背穿着状态；图2为原始产品图，只参考产品颜色、材质、版型结构和设计细节。
+    return f"""重要：请严格按图片编号理解参考图，不能互换。图1只代表场景模特服装图，图2只代表正侧背款式参考，图3只代表姿势参考。
 
-图1为我的产品模特上身3视图
-图2为我的原始产品图
+图1为我的场景模特服装图
 
-提示词：
+图2为我的正侧背款式参考
 
-为这款（{desc}）生成符合亚马逊规范的背面/侧背白底主图。
+图3为我的姿势参考
 
-要求：
-
-1.画面目标不是时尚人像，而是亚马逊服装主图。必须生成单人单图的背面或侧背面产品展示，禁止三联图、拼图、多人物、多角度同时展示。
-
-2.构图必须为近距离商品特写：画面裁切范围优先为肩颈/下巴以下至衣服下摆附近，只保留必要肩背、手臂边缘和少量下装边缘。产品主体必须居中，产品在整张图中的视觉占比达到85%-90%。
-
-3.产品必须完整、清晰、无变形地穿在模特身上，严格保留图2原始产品的白色、材质纹理、版型结构、双层效果、吊带细节和所有设计细节，并体现背面/侧背穿着状态。
-
-4.手、头发、配饰、包、杯子、外套、衬衫、道具不得遮挡产品，不得添加多余搭配，不得出现品牌logo、水印、文字。
-
-5.背景必须为纯白底（RGB255,255,255），无阴影杂色、无街头、无户外、无室内生活场景、无地面墙面、无路人或额外人物。
-
-6.输出规格：亚马逊电商主图，真实棚拍质感，产品边缘清晰，面料纹理可见，高清商业摄影，未过度磨皮，画面比例3:4。"""
+图片要求：为这款{desc}生成侧背面视角白底主图。人物姿势100%参考图3，严格保留图1模特面部特征、五官比例、肤色、发型、身材轮廓，严格保留图2正侧背款式的背面/侧背穿着状态、颜色、材质纹理、版型结构、所有设计细节不随意发挥。构图近距离特写（肩颈至胯部，露出下装），产品居中占比85%-90%。背景纯白（RGB255,255,255），无阴影杂色。使用哈苏Hasselblad 100mm镜头拍摄，自然肤质，毛孔清晰可见，不过度磨皮。输出规格：亚马逊电商主图，高清商业摄影，画面比例3:4。"""
 
 
 def build_workflow_steps(
@@ -200,16 +174,9 @@ def build_workflow_steps(
     fit_side_asset_id: str,
     fit_back_asset_id: str,
     scene_asset_id: str,
-    pose_asset_id: str = "",
 ) -> list[dict[str, Any]]:
     style_prompt = STYLE_OPTIONS[style_key]["prompt"]
     angle_prompt = _angle_prompt(style_prompt)
-    angle_refs = [
-        {"type": "step", "id": "scene_model"},
-        {"type": "step", "id": "model_on_body"},
-    ]
-    if pose_asset_id:
-        angle_refs.append({"type": "asset", "id": pose_asset_id})
     return [
         {
             "stage_id": "model_on_body",
@@ -247,9 +214,13 @@ def build_workflow_steps(
                 "generation_order": image_no,
                 "title": f"第{image_no}张：正侧背其他角度图",
                 "prompt": angle_prompt,
-                "input_asset_ids": [pose_asset_id] if pose_asset_id else [],
+                "input_asset_ids": [],
                 "input_step_ids": ["scene_model", "model_on_body"],
-                "input_refs": [dict(ref) for ref in angle_refs],
+                "input_refs": [
+                    {"type": "step", "id": "scene_model"},
+                    {"type": "step", "id": "model_on_body"},
+                ],
+                "pose_slot": True,
             }
             for image_no in range(3, 7)
         ],
@@ -275,6 +246,7 @@ def build_workflow_steps(
                 {"type": "step", "id": "model_on_body"},
                 {"type": "asset", "id": product_asset_id},
             ],
+            "pose_slot": True,
         },
         {
             "stage_id": "white_back",
@@ -288,5 +260,6 @@ def build_workflow_steps(
                 {"type": "step", "id": "model_on_body"},
                 {"type": "asset", "id": product_asset_id},
             ],
+            "pose_slot": True,
         },
     ]

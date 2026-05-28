@@ -107,7 +107,6 @@ class DocxWorkflowRunIn(BaseModel):
     fit_side_asset_id: str
     fit_back_asset_id: str
     scene_asset_id: str
-    pose_asset_id: str = ""
     image_model: str | None = None
     size: str = "1024x1024"
     quality: str = "high"
@@ -298,7 +297,6 @@ def fetch_project_workflow_package(conn: sqlite3.Connection, project_id: str) ->
         "fit_side_asset_id": project.get("fit_side_asset_id", ""),
         "fit_back_asset_id": project.get("fit_back_asset_id", ""),
         "scene_asset_id": project.get("scene_asset_id", ""),
-        "pose_asset_id": project.get("pose_asset_id", ""),
     }
     steps = attach_docx_reference_items(conn, pseudo_run, steps)
     return {
@@ -312,7 +310,6 @@ def fetch_project_workflow_package(conn: sqlite3.Connection, project_id: str) ->
         "fit_side_asset_id": project.get("fit_side_asset_id", ""),
         "fit_back_asset_id": project.get("fit_back_asset_id", ""),
         "scene_asset_id": project.get("scene_asset_id", ""),
-        "pose_asset_id": project.get("pose_asset_id", ""),
         "image_model": project.get("image_model", ""),
         "size": project.get("size", "1024x1024"),
         "quality": project.get("quality", "high"),
@@ -426,8 +423,6 @@ def validate_docx_workflow_input(conn, payload: DocxWorkflowRunIn) -> list[dict]
         payload.fit_back_asset_id,
         payload.scene_asset_id,
     ]
-    if payload.pose_asset_id:
-        asset_ids.append(payload.pose_asset_id)
     assets = get_assets_by_ids(conn, list(dict.fromkeys(asset_ids)))
     found = {asset["id"]: asset for asset in assets}
     missing = [asset_id for asset_id in asset_ids if asset_id not in found]
@@ -456,7 +451,6 @@ def insert_project_workflow_steps(conn: sqlite3.Connection, project_id: str, pay
         fit_side_asset_id=payload.fit_side_asset_id,
         fit_back_asset_id=payload.fit_back_asset_id,
         scene_asset_id=payload.scene_asset_id,
-        pose_asset_id=getattr(payload, "pose_asset_id", ""),
     )
     rag_references = get_rag_references_for_project(conn, project_id)
     steps = enrich_docx_steps_with_rag(steps, rag_references)
@@ -733,7 +727,7 @@ def init_project_workflow(project_id: str, payload: DocxWorkflowRunIn) -> dict:
         conn.execute(
             """UPDATE projects SET
                product_name = ?, material = ?, style_key = ?,
-               product_asset_id = ?, model_asset_id = ?, fit_front_asset_id = ?, fit_side_asset_id = ?, fit_back_asset_id = ?, scene_asset_id = ?, pose_asset_id = ?,
+               product_asset_id = ?, model_asset_id = ?, fit_front_asset_id = ?, fit_side_asset_id = ?, fit_back_asset_id = ?, scene_asset_id = ?,
                image_model = ?, size = ?, quality = ?,
                workflow_status = 'idle', workflow_error = '', updated_at = ?
                WHERE id = ?""",
@@ -741,7 +735,7 @@ def init_project_workflow(project_id: str, payload: DocxWorkflowRunIn) -> dict:
                 payload.product_name, payload.material, payload.style_key,
                 payload.product_asset_id, payload.model_asset_id,
                 payload.fit_front_asset_id, payload.fit_side_asset_id, payload.fit_back_asset_id,
-                payload.scene_asset_id, payload.pose_asset_id,
+                payload.scene_asset_id,
                 payload.image_model or "", payload.size, payload.quality,
                 now_iso(), project_id,
             ),

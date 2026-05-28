@@ -113,7 +113,7 @@ def test_angle_stage_uses_single_pose_reference_as_image_three():
     assert "composition" not in enriched[0]["prompt"]
 
 
-def test_angle_stage_with_uploaded_pose_asset_does_not_add_rag_pose_reference():
+def test_angle_stage_with_selected_pose_asset_does_not_add_rag_pose_reference():
     steps = [
         {
             "stage_id": "angle_3",
@@ -122,9 +122,9 @@ def test_angle_stage_with_uploaded_pose_asset_does_not_add_rag_pose_reference():
             "input_refs": [
                 {"type": "step", "id": "scene_model"},
                 {"type": "step", "id": "model_on_body"},
-                {"type": "asset", "id": "uploaded-pose"},
+                {"type": "asset", "id": "selected-pose"},
             ],
-            "input_asset_ids": ["uploaded-pose"],
+            "input_asset_ids": ["selected-pose"],
             "input_step_ids": ["scene_model", "model_on_body"],
         }
     ]
@@ -135,7 +135,7 @@ def test_angle_stage_with_uploaded_pose_asset_does_not_add_rag_pose_reference():
     assert enriched[0]["input_refs"] == [
         {"type": "step", "id": "scene_model"},
         {"type": "step", "id": "model_on_body"},
-        {"type": "asset", "id": "uploaded-pose"},
+        {"type": "asset", "id": "selected-pose"},
     ]
     assert RAG_CONTEXT_BLOCK_START not in enriched[0]["prompt"]
     assert "rag-pose" not in enriched[0]["prompt"]
