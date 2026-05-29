@@ -115,6 +115,51 @@ def _stage_2_prompt(product_name: str, material: str, style_prompt: str) -> str:
 禁止出现两个或多个主体人物"""
 
 
+def _angle_front_prompt(style_prompt: str) -> str:
+    return f"""重要：请严格按图片编号理解参考图。图1是已经确定好的场景模特图，是人物身份、场景和整体风格基础；图2是模特上身3视图，只用于校准服装款式、正侧背结构和细节。图3是姿势参考，只用于改变模特的表情和姿势最终。画面只能出现图1中的同一个人物。
+
+图1确定好的场景模特图，图2模特上身3视图，图3姿势参考图
+
+【生成要求】
+1. 保持图1人物穿搭（包包，项链，耳环，手链，帽子）完全不变，服装款式严格参考图2的款式不变，只把姿势和人物表情100%还原换成图3的正面姿势。
+2.整张图片只展示图2的服装正面。
+3. 要求手和头发，包包道具不挡住产品，整体风格统一，画面中只能出现一个人物，禁止三宫格、拼图、多人同框或一次生成多张图。
+
+风格统一：严格遵循图1的摄影风格，包括色调（冷调/暖调/胶片感）、光影类型（自然光/柔光箱/逆光/侧光）、景深效果、画面质感
+
+4.输出规格：{_half_body_spec(style_prompt)}"""
+
+
+def _angle_side_prompt(style_prompt: str) -> str:
+    return f"""重要：请严格按图片编号理解参考图。图1是已经确定好的场景模特图，是人物身份、场景和整体风格基础；图2是模特上身3视图，只用于校准服装款式、正侧背结构和细节。图3是姿势参考，只用于改变模特的表情和姿势最终。画面只能出现图1中的同一个人物。
+
+图1确定好的场景模特图，图2模特上身3视图，图3姿势参考图
+
+【生成要求】
+1. 保持图1人物穿搭（包包，项链，耳环，手链，帽子）完全不变，服装款式严格参考图2的款式不变，只把姿势和人物表情100%还原换成图3的侧面姿势。
+2.整张图片只展示图2的服装四分之三侧面角度。
+3. 要求手和头发，包包道具不挡住产品，整体风格统一，画面中只能出现一个人物，禁止三宫格、拼图、多人同框或一次生成多张图。
+
+风格统一：严格遵循图1的摄影风格，包括色调（冷调/暖调/胶片感）、光影类型（自然光/柔光箱/逆光/侧光）、景深效果、画面质感
+
+4.输出规格：{_half_body_spec(style_prompt)}"""
+
+
+def _angle_back_prompt(style_prompt: str) -> str:
+    return f"""重要：请严格按图片编号理解参考图。图1是已经确定好的场景模特图，是人物身份、场景和整体风格基础；图2是模特上身3视图，只用于校准服装款式、正侧背结构和细节。图3是姿势参考，只用于改变模特的表情和姿势最终。画面只能出现图1中的同一个人物。
+
+图1确定好的场景模特图，图2模特上身3视图，图3姿势参考图
+
+【生成要求】
+1. 保持图1人物穿搭（包包，项链，耳环，手链，帽子）完全不变，服装款式严格参考图2的款式不变，只把姿势和人物表情100%还原换成图3的背面姿势。
+2.整张图片只展示图2的服装背面。
+3. 要求手和头发，包包道具不挡住产品，整体风格统一，画面中只能出现一个人物，禁止三宫格、拼图、多人同框或一次生成多张图。
+
+风格统一：严格遵循图1的摄影风格，包括色调（冷调/暖调/胶片感）、光影类型（自然光/柔光箱/逆光/侧光）、景深效果、画面质感
+
+4.输出规格：{_half_body_spec(style_prompt)}"""
+
+
 def _angle_prompt(style_prompt: str) -> str:
     return f"""重要：请严格按图片编号理解参考图。图1是已经确定好的场景模特图，是人物身份、场景和整体风格基础；图2是模特上身3视图，只用于校准服装款式、正侧背结构和细节。图3是姿势参考，只用于改变模特的表情和姿势最终。画面只能出现图1中的同一个人物。
 
@@ -177,7 +222,6 @@ def build_workflow_steps(
     accessory_asset_id: str = "",
 ) -> list[dict[str, Any]]:
     style_prompt = STYLE_OPTIONS[style_key]["prompt"]
-    angle_prompt = _angle_prompt(style_prompt)
 
     outfit_input_asset_ids: list[str] = []
     outfit_input_refs: list[dict[str, str]] = [{"type": "step", "id": "scene_model"}]
@@ -215,23 +259,62 @@ def build_workflow_steps(
                 {"type": "step", "id": "model_on_body"},
             ],
         },
-        *[
-            {
-                "stage_id": f"angle_{image_no}",
-                "image_no": image_no,
-                "generation_order": image_no,
-                "title": f"第{image_no}张：正侧背其他角度图",
-                "prompt": angle_prompt,
-                "input_asset_ids": [],
-                "input_step_ids": ["scene_model", "model_on_body"],
-                "input_refs": [
-                    {"type": "step", "id": "scene_model"},
-                    {"type": "step", "id": "model_on_body"},
-                ],
-                "pose_slot": True,
-            }
-            for image_no in range(3, 7)
-        ],
+        {
+            "stage_id": "angle_3",
+            "image_no": 3,
+            "generation_order": 3,
+            "title": "第三张：正面角度图",
+            "prompt": _angle_front_prompt(style_prompt),
+            "input_asset_ids": [],
+            "input_step_ids": ["scene_model", "model_on_body"],
+            "input_refs": [
+                {"type": "step", "id": "scene_model"},
+                {"type": "step", "id": "model_on_body"},
+            ],
+            "pose_slot": True,
+        },
+        {
+            "stage_id": "angle_4",
+            "image_no": 4,
+            "generation_order": 4,
+            "title": "第四张：侧面角度图",
+            "prompt": _angle_side_prompt(style_prompt),
+            "input_asset_ids": [],
+            "input_step_ids": ["scene_model", "model_on_body"],
+            "input_refs": [
+                {"type": "step", "id": "scene_model"},
+                {"type": "step", "id": "model_on_body"},
+            ],
+            "pose_slot": True,
+        },
+        {
+            "stage_id": "angle_5",
+            "image_no": 5,
+            "generation_order": 5,
+            "title": "第五张：背面角度图",
+            "prompt": _angle_back_prompt(style_prompt),
+            "input_asset_ids": [],
+            "input_step_ids": ["scene_model", "model_on_body"],
+            "input_refs": [
+                {"type": "step", "id": "scene_model"},
+                {"type": "step", "id": "model_on_body"},
+            ],
+            "pose_slot": True,
+        },
+        {
+            "stage_id": "angle_6",
+            "image_no": 6,
+            "generation_order": 6,
+            "title": "第六张：正侧背其他角度图",
+            "prompt": _angle_prompt(style_prompt),
+            "input_asset_ids": [],
+            "input_step_ids": ["scene_model", "model_on_body"],
+            "input_refs": [
+                {"type": "step", "id": "scene_model"},
+                {"type": "step", "id": "model_on_body"},
+            ],
+            "pose_slot": True,
+        },
         {
             "stage_id": "outfit",
             "image_no": 7,
