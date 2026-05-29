@@ -83,113 +83,202 @@ async function request(path, options = {}) {
   return res.json();
 }
 
-function RagKnowledgeWorkbench({ project, refreshProject }) {
-  const [health, setHealth] = useState(null);
-  const [query, setQuery] = useState(defaultRagQuery(project));
+const RAG_ASSET_TYPES = [
+  ["", "全部类型"],
+  ["model", "模特图"],
+  ["other", "其他参考图"],
+];
+
+const RAG_ASSET_TYPE_LABELS = { model: "模特图", other: "其他参考图" };
+
+const RAG_ROLES = [
+  ["", "未指定"],
+  ["model", "模特参考"],
+  ["scene_style", "场景风格参考"],
+  ["pose", "姿势参考"],
+  ["accessory", "配饰参考"],
+];
+
+const RAG_ROLE_LABELS = { model: "模特参考", scene_style: "场景风格参考", pose: "姿势参考", accessory: "配饰参考" };
+
+const RAG_USE_ROLES = [
+  { rag_role: "model", slot: "model_reference", label: "用作模特参考" },
+  { rag_role: "scene_style", slot: "scene_reference", label: "用作场景风格参考" },
+  { rag_role: "pose", slot: "pose_reference", label: "用作姿势参考" },
+  { rag_role: "accessory", slot: "accessory_reference", label: "用作配饰参考" },
+];
+const RAG_SEARCH_CACHE_LIMIT = 200;
+
+function RagSearchPanel({ title, assetType, defaultQuery, busy, onUseAsAsset }) {
+  const [query, setQuery] = useState(defaultQuery || "");
   const [topK, setTopK] = useState(8);
-  const [filterText, setFilterText] = useState("");
   const [results, setResults] = useState([]);
-  const [references, setReferences] = useState([]);
-  const [selectedTags, setSelectedTags] = useState({});
-  const [busy, setBusy] = useState(false);
+  const [searchBusy, setSearchBusy] = useState(false);
   const [error, setError] = useState("");
   const [previewImage, setPreviewImage] = useState(null);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [cachedResults, setCachedResults] = useState([]);
+  const [cacheHasMore, setCacheHasMore] = useState(false);
+  const [searchCache, setSearchCache] = useState({});
 
-  const loadReferences = async () => {
-    if (!project?.id) return;
-    const data = await request(`/api/projects/${project.id}/rag-references`);
-    setReferences(data);
+  const showCachedPage = (items, nextPage, pageSize = topK) => {
+    const safePageSize = Math.max(1, Number(pageSize) || 8);
+    const maxPage = Math.max(0, Math.ceil(items.length / safePageSize) - 1);
+    const safePage = Math.min(Math.max(0, nextPage), maxPage);
+    const start = safePage * safePageSize;
+    setPage(safePage);
+    setResults(items.slice(start, start + safePageSize));
+    setHasMore(start + safePageSize < items.length);
   };
 
-  useEffect(() => {
-    setQuery(defaultRagQuery(project));
-    setResults([]);
-    setError("");
-    request("/api/rag/health").then(setHealth).catch((err) => setHealth({ status: "unavailable", detail: err.message }));
-    loadReferences().catch((err) => setError(err.message));
-  }, [project?.id]);
-
-  const parseFilters = () => {
-    const text = filterText.trim();
-    if (!text) return {};
-    try {
-      const parsed = JSON.parse(text);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-    } catch {
-      throw new Error("过滤条件必须是 JSON 对象，例如 {\"compliance\":\"approved\"}");
-    }
-  };
-
-  const search = async () => {
+  const doSearch = async () => {
     if (!query.trim()) return;
-    setBusy(true);
+    const filters = assetType ? { asset_type: assetType } : {};
+    const cacheKey = JSON.stringify({ query: query.trim(), filters });
+    const cached = searchCache[cacheKey];
+    if (cached) {
+      setCachedResults(cached.results);
+      setCacheHasMore(cached.hasMore);
+      showCachedPage(cached.results, 0);
+      return;
+    }
+    setSearchBusy(true);
     setError("");
     try {
+      const fetchLimit = Math.max(RAG_SEARCH_CACHE_LIMIT, Number(topK) || 8);
       const data = await request("/api/rag/search", {
         method: "POST",
-        body: JSON.stringify({ query, top_k: topK, filters: parseFilters() }),
+        body: JSON.stringify({ query, top_k: fetchLimit, offset: 0, filters }),
       });
-      setResults(data.results || []);
+      const nextResults = data.results || [];
+      setCachedResults(nextResults);
+      setCacheHasMore(Boolean(data.has_more));
+      setSearchCache((prev) => ({
+        ...prev,
+        [cacheKey]: { results: nextResults, hasMore: Boolean(data.has_more) },
+      }));
+      showCachedPage(nextResults, 0);
     } catch (err) {
       setError(err.message);
     } finally {
-      setBusy(false);
+      setSearchBusy(false);
     }
   };
 
-  const addReference = async (item) => {
-    const usage_tags = selectedTags[item.image_id] || ["scene_reference"];
+  const prevPage = () => {
+    if (page <= 0) return;
+    showCachedPage(cachedResults, page - 1);
+  };
+
+  const nextPage = () => {
+    if (!hasMore) return;
+    showCachedPage(cachedResults, page + 1);
+  };
+
+  return (
+    <div className="rag-search-panel">
+      <div className="rag-panel-head">
+        <strong>{title}</strong>
+      </div>
+      <div className="rag-panel-controls">
+        <label className="stacked-field">
+          <span>检索词</span>
+          <input value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(e) => { if (e.key === "Enter") doSearch(); }} />
+        </label>
+        <label className="stacked-field narrow">
+          <span>数量</span>
+          <input
+            type="number"
+            min="1"
+            max="64"
+            value={topK}
+            onChange={(event) => {
+              const nextTopK = Number(event.target.value) || 8;
+              setTopK(nextTopK);
+              if (cachedResults.length) {
+                showCachedPage(cachedResults, 0, nextTopK);
+              }
+            }}
+          />
+        </label>
+        <button className="primary" disabled={searchBusy || !query.trim() || busy} onClick={() => doSearch()}>
+          <Search size={14} />
+          搜索
+        </button>
+      </div>
+      {error ? <div className="error-banner">{error}</div> : null}
+      {results.length ? (
+        <div className="rag-pagination">
+          <button disabled={page <= 0 || searchBusy} onClick={prevPage}>上一页</button>
+          <span>第 {page + 1} / {Math.max(1, Math.ceil(cachedResults.length / topK))} 页</span>
+          <button disabled={!hasMore || searchBusy} onClick={nextPage}>下一页</button>
+          <small>已缓存 {cachedResults.length} 张{cacheHasMore ? "，后续结果可重新搜索刷新" : ""}</small>
+        </div>
+      ) : null}
+      <div className="rag-results-grid">
+        {results.map((item) => (
+          <article key={item.image_id} className="rag-card">
+            <img
+              src={`${API}/api/rag/images/${item.image_id}`}
+              alt={item.filename || item.image_id}
+              className="clickable-img"
+              onClick={() => setPreviewImage({ src: `${API}/api/rag/images/${item.image_id}`, alt: item.filename || item.image_id })}
+            />
+            <div className="rag-card-body">
+              <strong>{item.filename || item.image_id}</strong>
+              <span>{item.category || "未分类"} · {item.scene || "未知场景"}</span>
+              <small>{item.image_type || item.caption || ""}</small>
+              <em>相似度：{typeof item.score === "number" ? item.score.toFixed(4) : "-"}</em>
+              <div className="rag-use-buttons">
+                {RAG_USE_ROLES.filter((r) => assetType === "model" ? r.rag_role === "model" : r.rag_role !== "model").map((r) => (
+                  <button key={r.rag_role} disabled={searchBusy || busy} onClick={() => onUseAsAsset(item, r)}>
+                    <Check size={12} />
+                    {r.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </article>
+        ))}
+        {!results.length && !searchBusy ? <p className="muted">输入检索词后点击搜索</p> : null}
+      </div>
+      <ImagePreviewModal src={previewImage?.src} alt={previewImage?.alt} onClose={() => setPreviewImage(null)} />
+    </div>
+  );
+}
+
+function RagKnowledgeWorkbench({ project, refreshProject, onAssetCreated }) {
+  const [health, setHealth] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const defaultQuery = defaultRagQuery(project);
+
+  useEffect(() => {
+    setError("");
+    request("/api/rag/health").then(setHealth).catch((err) => setHealth({ status: "unavailable", detail: err.message }));
+  }, [project?.id]);
+
+  const useAsAsset = async (item, role) => {
     setBusy(true);
     setError("");
     try {
-      await request(`/api/projects/${project.id}/rag-references`, {
+      const result = await request(`/api/projects/${project.id}/rag-to-asset`, {
         method: "POST",
         body: JSON.stringify({
           rag_image_id: item.image_id,
           filename: item.filename || "",
-          category: item.category || "",
-          scene: item.scene || "",
-          image_type: item.image_type || "",
-          caption: item.caption || "",
-          score: item.score ?? null,
-          usage_tags,
-          metadata: item.metadata || {},
-          notes: "从知识库工作台加入",
+          slot: role.slot,
+          rag_role: role.rag_role,
         }),
       });
-      await loadReferences();
       await refreshProject();
+      if (onAssetCreated) onAssetCreated(result, role.slot);
     } catch (err) {
       setError(err.message);
     } finally {
       setBusy(false);
     }
-  };
-
-  const updateReferenceTags = async (reference, tag, checked) => {
-    const current = new Set(reference.usage_tags || []);
-    if (checked) current.add(tag);
-    else current.delete(tag);
-    const usage_tags = [...current];
-    const updated = await request(`/api/projects/${project.id}/rag-references/${reference.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ usage_tags }),
-    });
-    setReferences((items) => items.map((item) => (item.id === updated.id ? updated : item)));
-  };
-
-  const updateModelDescription = async (reference, description) => {
-    const updated = await request(`/api/projects/${project.id}/rag-references/${reference.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ model_description: description }),
-    });
-    setReferences((items) => items.map((item) => (item.id === updated.id ? updated : item)));
-  };
-
-  const removeReference = async (referenceId) => {
-    if (!confirm("确认从本项目参考池移除这张知识库图片？")) return;
-    await request(`/api/projects/${project.id}/rag-references/${referenceId}`, { method: "DELETE" });
-    await loadReferences();
   };
 
   return (
@@ -203,102 +292,11 @@ function RagKnowledgeWorkbench({ project, refreshProject }) {
           RAG：{health?.status === "ok" ? `可用 · ${health.images || 0} 张图` : "不可用"}
         </span>
       </div>
-      <div className="rag-search-grid">
-        <label className="stacked-field">
-          <span>检索词</span>
-          <input value={query} onChange={(event) => setQuery(event.target.value)} />
-        </label>
-        <label className="stacked-field">
-          <span>返回数量</span>
-          <input type="number" min="1" max="20" value={topK} onChange={(event) => setTopK(Number(event.target.value) || 8)} />
-        </label>
-        <label className="stacked-field">
-          <span>过滤 JSON</span>
-          <input placeholder='{"compliance":"approved"}' value={filterText} onChange={(event) => setFilterText(event.target.value)} />
-        </label>
-        <button className="primary" disabled={busy || !query.trim()} onClick={search}>
-          <Search size={16} />
-          搜索知识库
-        </button>
-      </div>
       {error ? <div className="error-banner">{error}</div> : null}
-      <div className="rag-results-grid">
-        {results.map((item) => (
-          <article key={item.image_id} className="rag-card">
-            <img src={`${API}/api/rag/images/${item.image_id}`} alt={item.filename || item.image_id} className="clickable-img" onClick={() => setPreviewImage({ src: `${API}/api/rag/images/${item.image_id}`, alt: item.filename || item.image_id })} />
-            <div className="rag-card-body">
-              <strong>{item.filename || item.image_id}</strong>
-              <span>{item.category || "未分类"} · {item.scene || "未知场景"}</span>
-              <small>{item.image_type || item.caption || ""}</small>
-              <em>相似度：{typeof item.score === "number" ? item.score.toFixed(4) : "-"}</em>
-              <select
-                value={(selectedTags[item.image_id] || ["scene_reference"])[0]}
-                onChange={(event) => setSelectedTags({ ...selectedTags, [item.image_id]: [event.target.value] })}
-              >
-                {RAG_USAGE_TAGS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-              <button disabled={busy} onClick={() => addReference(item)}>
-                <Check size={14} />
-                加入本项目
-              </button>
-            </div>
-          </article>
-        ))}
+      <div className="rag-search-split">
+        <RagSearchPanel title="模特图" assetType="model" defaultQuery={defaultQuery} busy={busy} onUseAsAsset={useAsAsset} />
+        <RagSearchPanel title="场景 / 姿势 / 配饰参考图" assetType="other" defaultQuery={defaultQuery} busy={busy} onUseAsAsset={useAsAsset} />
       </div>
-      <div className="rag-reference-pool">
-        <div className="prompt-head">
-          <strong>项目参考池</strong>
-          <span>{references.length} 张</span>
-        </div>
-        {references.length ? references.map((reference) => (
-          <article key={reference.id} className="rag-reference-row">
-            <img src={`${API}${reference.image_url}`} alt={reference.filename || reference.rag_image_id} className="clickable-img" onClick={() => setPreviewImage({ src: `${API}${reference.image_url}`, alt: reference.filename || reference.rag_image_id })} />
-            <div>
-              <strong>{reference.filename || reference.rag_image_id}</strong>
-              <small>{reference.scene || reference.caption || ""}</small>
-              <div className="tag-grid">
-                {RAG_USAGE_TAGS.map(([value, label]) => (
-                  <label key={value}>
-                    <input
-                      type="checkbox"
-                      checked={(reference.usage_tags || []).includes(value)}
-                      onChange={(event) => updateReferenceTags(reference, value, event.target.checked)}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-              <label className="stacked-field rag-model-desc">
-                <span>这张图是什么（给模型看的说明）</span>
-                <textarea
-                  value={reference.model_description || ""}
-                  onChange={(event) => setReferences((items) => items.map((item) => item.id === reference.id ? { ...item, model_description: event.target.value } : item))}
-                  onBlur={(event) => updateModelDescription(reference, event.target.value)}
-                  rows={2}
-                />
-              </label>
-              <div className="rag-applied-steps">
-                <strong>预计用于：</strong>
-                {(reference.applied_steps || []).length ? (
-                  <span>
-                    {reference.applied_steps.map((s) => `第${s.image_no}张 ${s.title}`).join("、")}
-                  </span>
-                ) : (
-                  <span className="muted">未分配，请选择用途标签</span>
-                )}
-              </div>
-            </div>
-            <button className="icon-btn danger" title="移除" onClick={() => removeReference(reference.id)}>
-              <X size={14} />
-            </button>
-          </article>
-        )) : <p className="muted">还没有加入本项目的知识库参考图。</p>}
-      </div>
-      <ImagePreviewModal
-        src={previewImage?.src}
-        alt={previewImage?.alt}
-        onClose={() => setPreviewImage(null)}
-      />
     </section>
   );
 }
@@ -306,17 +304,19 @@ function RagKnowledgeWorkbench({ project, refreshProject }) {
 const DOCX_SLOT_TYPES = {
   product_image: ["product"],
   model_reference: ["model"],
+  scene_reference: ["model", "competitor", "other"],
   fit_reference: ["competitor"],
-  scene_style_reference: ["competitor"],
-  pose_reference: ["competitor"],
+  pose_reference: ["other"],
+  accessory_reference: ["competitor", "other"],
 };
 
 const DOCX_SLOT_LABELS = {
   product_image: "产品图",
-  model_reference: "模特参考",
+  model_reference: "模特参考图",
+  scene_reference: "场景风格参考图",
   fit_reference: "上身效果参考",
-  scene_style_reference: "场景风格参考",
   pose_reference: "姿势参考",
+  accessory_reference: "配饰参考",
 };
 
 function docxAssetsForSlot(assets, slotHint) {
@@ -354,7 +354,7 @@ function DocxAssetSelect({ label, assets, slotHint, value, onChange }) {
   );
 }
 
-function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
+function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef }) {
   const [styles, setStyles] = useState([]);
   const [imageModels, setImageModels] = useState([]);
   const [form, setForm] = useState({
@@ -366,19 +366,24 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
     quality: "high",
     product_asset_id: "",
     model_asset_id: "",
-    fit_asset_id: "",
     scene_asset_id: "",
-    pose_asset_id: "",
+    fit_front_asset_id: "",
+    fit_side_asset_id: "",
+    fit_back_asset_id: "",
+    accessory_asset_id: "",
   });
   const [workflow, setWorkflow] = useState(null);
   const [promptDrafts, setPromptDrafts] = useState({});
   const [busy, setBusy] = useState(false);
   const [previewImage, setPreviewImage] = useState(null);
   const productFileRef = useRef(null);
-  const modelFileRef = useRef(null);
-  const fitFileRef = useRef(null);
-  const sceneFileRef = useRef(null);
-  const poseFileRef = useRef(null);
+  const fitFrontFileRef = useRef(null);
+  const fitSideFileRef = useRef(null);
+  const fitBackFileRef = useRef(null);
+  useEffect(() => {
+    if (formSetterRef) formSetterRef.current = setForm;
+    return () => { if (formSetterRef) formSetterRef.current = null; };
+  }, [formSetterRef]);
 
   useEffect(() => {
     request("/api/docx-workflow/styles").then(setStyles).catch(() => setStyles([]));
@@ -415,9 +420,11 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
       quality: current.quality || workflow.quality || "high",
       product_asset_id: current.product_asset_id || workflow.product_asset_id || "",
       model_asset_id: current.model_asset_id || workflow.model_asset_id || "",
-      fit_asset_id: current.fit_asset_id || workflow.fit_asset_id || "",
       scene_asset_id: current.scene_asset_id || workflow.scene_asset_id || "",
-      pose_asset_id: current.pose_asset_id || workflow.pose_asset_id || "",
+      fit_front_asset_id: current.fit_front_asset_id || workflow.fit_front_asset_id || "",
+      fit_side_asset_id: current.fit_side_asset_id || workflow.fit_side_asset_id || "",
+      fit_back_asset_id: current.fit_back_asset_id || workflow.fit_back_asset_id || "",
+      accessory_asset_id: current.accessory_asset_id || workflow.accessory_asset_id || "",
     }));
   }, [workflow]);
 
@@ -447,8 +454,11 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
     form.quality &&
     form.product_asset_id &&
     form.model_asset_id &&
-    form.fit_asset_id &&
-    form.scene_asset_id;
+    form.scene_asset_id &&
+    form.fit_front_asset_id &&
+    form.fit_side_asset_id &&
+    form.fit_back_asset_id &&
+    form.accessory_asset_id;
 
   const initWorkflow = async () => {
     return request(`/api/projects/${project.id}/workflow`, {
@@ -474,22 +484,20 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
   const uploadRequiredAssets = async () => {
     setBusy(true);
     try {
-      const [productId, modelId, fitId, sceneId, poseId] = await Promise.all([
+      const [productId, fitFrontId, fitSideId, fitBackId] = await Promise.all([
         uploadOne(productFileRef, "product", "product_image", "固定九图流程：产品图"),
-        uploadOne(modelFileRef, "model", "model_reference", "固定九图流程：模特面部及身材参考图"),
-        uploadOne(fitFileRef, "competitor", "fit_reference", "固定九图流程：衣服上身效果参考图"),
-        uploadOne(sceneFileRef, "competitor", "scene_style_reference", "固定九图流程：场景风格参考图"),
-        uploadOne(poseFileRef, "competitor", "pose_reference", "固定九图流程：姿势参考图"),
+        uploadOne(fitFrontFileRef, "competitor", "fit_reference", "固定九图流程：上身效果正面参考图"),
+        uploadOne(fitSideFileRef, "competitor", "fit_reference", "固定九图流程：上身效果侧面参考图"),
+        uploadOne(fitBackFileRef, "competitor", "fit_reference", "固定九图流程：上身效果背面参考图"),
       ]);
       setForm((current) => ({
         ...current,
         product_asset_id: productId || current.product_asset_id,
-        model_asset_id: modelId || current.model_asset_id,
-        fit_asset_id: fitId || current.fit_asset_id,
-        scene_asset_id: sceneId || current.scene_asset_id,
-        pose_asset_id: poseId || current.pose_asset_id,
+        fit_front_asset_id: fitFrontId || current.fit_front_asset_id,
+        fit_side_asset_id: fitSideId || current.fit_side_asset_id,
+        fit_back_asset_id: fitBackId || current.fit_back_asset_id,
       }));
-      if (productId || modelId || fitId || sceneId || poseId) {
+      if (productId || fitFrontId || fitSideId || fitBackId) {
         setWorkflow(null);
       }
       await refresh();
@@ -592,21 +600,51 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
     }
   };
 
-  const removeRagRefFromStep = async (step, ragRefId) => {
-    const currentRefs = step.input_refs || [];
-    const newRefs = currentRefs.filter((ref) => !(ref.type === "rag" && ref.id === ragRefId));
+  const refreshWorkflow = async () => {
+    try {
+      const updated = await request(`/api/projects/${project.id}/workflow`);
+      setWorkflow(updated);
+    } catch {
+      setWorkflow(null);
+    }
+  };
+
+  const updateStepPoseRef = async (step, newAssetId) => {
     setBusy(true);
     try {
-      const updated = await request(`/api/projects/workflow/steps/${step.id}`, {
+      const updated = await request(`/api/projects/workflow/steps/${step.id}/pose-ref`, {
         method: "PATCH",
-        body: JSON.stringify({ input_refs: newRefs }),
+        body: JSON.stringify({ pose_asset_id: newAssetId }),
       });
-      setWorkflow((current) => current ? { ...current, steps: (current.steps || []).map((s) => s.id === step.id ? { ...s, ...updated } : s) } : current);
+      setWorkflow(updated);
+      await refresh();
     } catch (err) {
       alert(err.message);
     } finally {
       setBusy(false);
     }
+  };
+
+  const isPoseAsset = (assetId) => {
+    const asset = assets.find((a) => a.id === assetId);
+    return asset?.slot === "pose_reference";
+  };
+
+  const getStepPoseAssetId = (step) => {
+    const refs = step.input_refs || [];
+    for (const ref of refs) {
+      if (ref.type === "asset" && isPoseAsset(ref.id)) return ref.id;
+    }
+    return "";
+  };
+
+  const getStepPoseAssets = (step) => {
+    if (!step.pose_slot) return [];
+    const refs = step.input_refs || [];
+    return refs
+      .filter((ref) => ref.type === "asset" && isPoseAsset(ref.id))
+      .map((ref) => assets.find((a) => a.id === ref.id))
+      .filter(Boolean);
   };
 
   const markKnowledgeCandidate = async (step) => {
@@ -647,20 +685,16 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
           <input ref={productFileRef} type="file" accept="image/*" />
         </label>
         <label className="stacked-field">
-          <span>模特面部及身材参考图</span>
-          <input ref={modelFileRef} type="file" accept="image/*" />
+          <span>上身效果正面参考图</span>
+          <input ref={fitFrontFileRef} type="file" accept="image/*" />
         </label>
         <label className="stacked-field">
-          <span>衣服上身效果参考图</span>
-          <input ref={fitFileRef} type="file" accept="image/*" />
+          <span>上身效果侧面参考图</span>
+          <input ref={fitSideFileRef} type="file" accept="image/*" />
         </label>
         <label className="stacked-field">
-          <span>场景风格参考图</span>
-          <input ref={sceneFileRef} type="file" accept="image/*" />
-        </label>
-        <label className="stacked-field">
-          <span>姿势参考图（可选）</span>
-          <input ref={poseFileRef} type="file" accept="image/*" />
+          <span>上身效果背面参考图</span>
+          <input ref={fitBackFileRef} type="file" accept="image/*" />
         </label>
       </div>
       <button className="primary" disabled={busy} onClick={uploadRequiredAssets}>
@@ -718,19 +752,12 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
       </div>
       <div className="docx-asset-grid">
         <DocxAssetSelect label="产品图" assets={assets} slotHint="product_image" value={form.product_asset_id} onChange={(value) => setForm({ ...form, product_asset_id: value })} />
-        <DocxAssetSelect label="模特面部及身材参考图" assets={assets} slotHint="model_reference" value={form.model_asset_id} onChange={(value) => setForm({ ...form, model_asset_id: value })} />
-        <DocxAssetSelect label="衣服上身效果参考图" assets={assets} slotHint="fit_reference" value={form.fit_asset_id} onChange={(value) => setForm({ ...form, fit_asset_id: value })} />
-        <DocxAssetSelect label="场景风格参考图" assets={assets} slotHint="scene_style_reference" value={form.scene_asset_id} onChange={(value) => setForm({ ...form, scene_asset_id: value })} />
-        <DocxAssetSelect
-          label="姿势参考图（可选）"
-          assets={assets}
-          slotHint="pose_reference"
-          value={form.pose_asset_id}
-          onChange={(value) => {
-            setForm({ ...form, pose_asset_id: value });
-            setWorkflow(null);
-          }}
-        />
+        <DocxAssetSelect label="模特参考图" assets={assets} slotHint="model_reference" value={form.model_asset_id} onChange={(value) => setForm({ ...form, model_asset_id: value })} />
+        <DocxAssetSelect label="场景风格参考图" assets={assets} slotHint="scene_reference" value={form.scene_asset_id} onChange={(value) => setForm({ ...form, scene_asset_id: value })} />
+        <DocxAssetSelect label="上身效果正面参考图" assets={assets} slotHint="fit_reference" value={form.fit_front_asset_id} onChange={(value) => setForm({ ...form, fit_front_asset_id: value })} />
+        <DocxAssetSelect label="上身效果侧面参考图" assets={assets} slotHint="fit_reference" value={form.fit_side_asset_id} onChange={(value) => setForm({ ...form, fit_side_asset_id: value })} />
+        <DocxAssetSelect label="上身效果背面参考图" assets={assets} slotHint="fit_reference" value={form.fit_back_asset_id} onChange={(value) => setForm({ ...form, fit_back_asset_id: value })} />
+        <DocxAssetSelect label="配饰参考图" assets={assets} slotHint="accessory_reference" value={form.accessory_asset_id} onChange={(value) => setForm({ ...form, accessory_asset_id: value })} />
       </div>
       <div className="docx-actions">
         <button className="primary" disabled={!ready || busy} onClick={preview}>
@@ -745,6 +772,42 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
           一键下载 9 张图
         </button>
       </div>
+      {(() => {
+        const refFields = [
+          { id: form.product_asset_id, label: "产品图" },
+          { id: form.model_asset_id, label: "模特参考" },
+          { id: form.scene_asset_id, label: "场景参考" },
+          { id: form.fit_front_asset_id, label: "上身正面" },
+          { id: form.fit_side_asset_id, label: "上身侧面" },
+          { id: form.fit_back_asset_id, label: "上身背面" },
+          { id: form.accessory_asset_id, label: "配饰参考" },
+        ].filter((f) => f.id);
+        const poseAssets = assets.filter((a) => a.slot === "pose_reference" && a.url);
+        if (!refFields.length && !poseAssets.length) return null;
+        return (
+          <div className="docx-ref-overview">
+            <strong>参考图总览：</strong>
+            <div className="docx-ref-overview-grid">
+              {refFields.map((f) => {
+                const asset = assets.find((a) => a.id === f.id);
+                if (!asset?.url) return null;
+                return (
+                  <div key={f.id} className="docx-ref-overview-item" title={`${f.label} · ${asset.original_name}`}>
+                    <img src={`${API}${asset.url}`} alt={asset.original_name} className="clickable-img" onClick={() => setPreviewImage({ src: `${API}${asset.url}`, alt: asset.original_name })} />
+                    <span>{asset.original_name}</span>
+                  </div>
+                );
+              })}
+              {poseAssets.map((a) => (
+                <div key={a.id} className="docx-ref-overview-item" title={`姿势参考 · ${a.original_name}`}>
+                  <img src={`${API}${a.url}`} alt={a.original_name} className="clickable-img" onClick={() => setPreviewImage({ src: `${API}${a.url}`, alt: a.original_name })} />
+                  <span>{a.original_name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
       {workflow ? (
         <div className="docx-preview">
           <div className="prompt-head">
@@ -764,40 +827,49 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload }) {
                   value={promptDrafts[step.id] ?? step.prompt ?? ""}
                   onChange={(event) => setPromptDrafts({ ...promptDrafts, [step.id]: event.target.value })}
                 />
-                {(step.reference_items || []).filter((item) => item.type !== "rag").length ? (
-                  <div className="step-base-refs">
-                    <strong>基础参考：</strong>
-                    {(step.reference_items || []).filter((item) => item.type !== "rag").map((item) => (
-                      <div key={item.id} className="step-base-ref-item">
-                        {item.url ? <img src={`${API}${item.url}`} alt={item.label} className="step-base-ref-thumb clickable-img" onClick={() => setPreviewImage({ src: `${API}${item.url}`, alt: item.label })} /> : null}
-                        <div className="step-base-ref-text">
-                          <span>图{item.order} {item.label}</span>
-                          <small>{item.type === "step" ? `前置步骤 · ${item.status || "待生成"}` : item.slot || item.asset_type || ""}</small>
+                {(() => {
+                  const baseItems = (step.reference_items || []).filter((item) => item.type !== "rag" && item.slot !== "pose_reference");
+                  const poseAssets = getStepPoseAssets(step);
+                  const hasAny = baseItems.length || poseAssets.length || step.pose_slot;
+                  if (!hasAny) return null;
+                  return (
+                    <div className="step-base-refs">
+                      <strong>基础参考：</strong>
+                      {baseItems.map((item) => (
+                        <div key={item.id} className="step-base-ref-item">
+                          {item.url ? <img src={`${API}${item.url}`} alt={item.label} className="step-base-ref-thumb clickable-img" onClick={() => setPreviewImage({ src: `${API}${item.url}`, alt: item.label })} /> : null}
+                          <div className="step-base-ref-text">
+                            <span>图{item.order} {item.label}</span>
+                            <small>{item.type === "step" ? `前置步骤 · ${item.status || "待生成"}` : item.slot || item.asset_type || ""}</small>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="step-rag-refs">
-                  <strong>知识库参考：</strong>
-                  {(step.reference_items || []).filter((item) => item.type === "rag").length ? (
-                    (step.reference_items || []).filter((item) => item.type === "rag").map((item) => (
-                      <div key={item.id} className="step-rag-ref-item">
-                        {item.url ? <img src={`${API}${item.url}`} alt={item.label} className="step-rag-thumb clickable-img" onClick={() => setPreviewImage({ src: `${API}${item.url}`, alt: item.label })} /> : null}
-                        <div className="step-rag-ref-text">
-                          <span>图{item.input_image_no} {item.label}</span>
-                          {item.usage_labels?.length ? <small>用途：{item.usage_labels.join("、")}</small> : null}
-                          {item.model_description ? <small>说明：{item.model_description}</small> : null}
+                      ))}
+                      {poseAssets.map((a) => (
+                        <div key={a.id} className="step-base-ref-item">
+                          {a.url ? <img src={`${API}${a.url}`} alt={a.original_name} className="step-base-ref-thumb clickable-img" onClick={() => setPreviewImage({ src: `${API}${a.url}`, alt: a.original_name })} /> : null}
+                          <div className="step-base-ref-text">
+                            <span>姿势参考 · {a.original_name}</span>
+                            <small>pose_reference</small>
+                          </div>
                         </div>
-                        <button className="icon-btn danger" title="从本图移除" onClick={() => removeRagRefFromStep(step, item.id)}>
-                          <X size={12} />
-                        </button>
-                      </div>
-                    ))
-                  ) : (
-                    <span className="muted">无</span>
-                  )}
-                </div>
+                      ))}
+                      {step.pose_slot ? (
+                        <div className="step-pose-select">
+                          <span>切换姿势：</span>
+                          <select
+                            value={getStepPoseAssetId(step)}
+                            onChange={(e) => updateStepPoseRef(step, e.target.value)}
+                          >
+                            <option value="">无</option>
+                            {assets.filter((a) => a.slot === "pose_reference" && a.url).map((a) => (
+                              <option key={a.id} value={a.id}>{a.original_name}</option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })()}
                 <div className="docx-actions">
                   <button onClick={() => savePrompt(step.id, promptDrafts[step.id] ?? step.prompt ?? "")}>保存提示词</button>
                   <button onClick={() => regenerateStep(step.id)} disabled={busy}>重新生成本张</button>
@@ -932,6 +1004,7 @@ export default function App() {
   const [selectedProject, setSelectedProject] = useState(null);
   const [projectDetail, setProjectDetail] = useState(null);
   const [error, setError] = useState("");
+  const docxFormSetter = useRef(null);
 
   const loadUsers = async () => {
     try {
@@ -1055,8 +1128,30 @@ export default function App() {
       <main className="no-sidebar">
         {selectedProject && projectDetail ? (
           <div className="workspace">
-            <RagKnowledgeWorkbench project={selectedProject} refreshProject={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} />
-            <DocxWorkflowPanel project={selectedProject} assets={assets} refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)} onDownload={() => loadProjects(selectedUser.id)} />
+            <RagKnowledgeWorkbench
+              project={selectedProject}
+              refreshProject={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)}
+              onAssetCreated={(asset, slot) => {
+                if (!docxFormSetter.current) return;
+                const fieldMap = {
+                  model_reference: "model_asset_id",
+                  scene_reference: "scene_asset_id",
+                  pose_reference: "pose_reference",
+                  accessory_reference: "accessory_asset_id",
+                };
+                const field = fieldMap[slot];
+                if (field && field !== "pose_reference") {
+                  docxFormSetter.current((prev) => ({ ...prev, [field]: asset.id }));
+                }
+              }}
+            />
+            <DocxWorkflowPanel
+              project={selectedProject}
+              assets={assets}
+              refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)}
+              onDownload={() => loadProjects(selectedUser.id)}
+              formSetterRef={docxFormSetter}
+            />
           </div>
         ) : (
           <section className="empty-state">请从左侧选择一个项目。</section>
