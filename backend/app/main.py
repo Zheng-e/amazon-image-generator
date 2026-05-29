@@ -1422,6 +1422,11 @@ def generate_project_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn
 
     input_paths: list[str] = []
     refs = step.get("input_refs") or []
+    with get_db() as conn:
+        all_steps = [row_to_dict(r) for r in conn.execute(
+            "SELECT * FROM project_workflow_steps WHERE project_id = ?", (project_id,)
+        ).fetchall()]
+    step_by_stage = {s["stage_id"]: s for s in all_steps}
     for ref in refs:
         if ref.get("type") == "asset":
             with get_db() as conn:
@@ -1431,15 +1436,9 @@ def generate_project_workflow_step(step_id: str, payload: DocxWorkflowGenerateIn
                 if asset.get("file_path") and Path(asset["file_path"]).is_file():
                     input_paths.append(asset["file_path"])
         elif ref.get("type") == "step":
-            with get_db() as conn:
-                src = conn.execute(
-                    "SELECT * FROM project_workflow_steps WHERE id = ? OR (stage_id = ? AND project_id = ?)",
-                    (ref["id"], ref["id"], project_id),
-                ).fetchone()
-            if src:
-                src = row_to_dict(src)
-                if src.get("image_path") and Path(src["image_path"]).is_file():
-                    input_paths.append(src["image_path"])
+            src = step_by_stage.get(ref["id"])
+            if src and src.get("image_path") and Path(src["image_path"]).is_file():
+                input_paths.append(src["image_path"])
 
     prompt = step.get("prompt") or ""
     if not prompt.strip():

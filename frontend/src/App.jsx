@@ -516,8 +516,9 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
       method: "PATCH",
       body: JSON.stringify({ prompt }),
     });
-    const updatedStep = (pkg.steps || []).find((s) => s.id === stepId);
-    setWorkflow((current) => current ? { ...current, steps: (current.steps || []).map((step) => step.id === stepId ? { ...step, ...(updatedStep || {}) } : step) } : current);
+    if (updated?.steps) {
+      setWorkflow(updated);
+    }
   };
 
   const saveAllPrompts = async () => {
