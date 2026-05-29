@@ -219,15 +219,15 @@ def build_workflow_steps(
     fit_side_asset_id: str,
     fit_back_asset_id: str,
     scene_asset_id: str,
-    accessory_asset_id: str = "",
+    accessory_asset_id: str,
 ) -> list[dict[str, Any]]:
     style_prompt = STYLE_OPTIONS[style_key]["prompt"]
 
-    outfit_input_asset_ids: list[str] = []
-    outfit_input_refs: list[dict[str, str]] = [{"type": "step", "id": "scene_model"}]
-    if accessory_asset_id:
-        outfit_input_asset_ids.append(accessory_asset_id)
-        outfit_input_refs.append({"type": "asset", "id": accessory_asset_id})
+    outfit_input_asset_ids: list[str] = [accessory_asset_id]
+    outfit_input_refs: list[dict[str, str]] = [
+        {"type": "step", "id": "scene_model"},
+        {"type": "asset", "id": accessory_asset_id},
+    ]
 
     return [
         {

@@ -103,9 +103,11 @@ def init_db() -> None:
                 style_key TEXT NOT NULL DEFAULT 'natural_fashion',
                 product_asset_id TEXT DEFAULT '',
                 model_asset_id TEXT DEFAULT '',
+                fit_asset_id TEXT DEFAULT '',
                 fit_front_asset_id TEXT DEFAULT '',
                 fit_side_asset_id TEXT DEFAULT '',
                 fit_back_asset_id TEXT DEFAULT '',
+                accessory_asset_id TEXT DEFAULT '',
                 scene_asset_id TEXT DEFAULT '',
                 accessory_asset_id TEXT DEFAULT '',
                 pose_asset_id TEXT DEFAULT '',
@@ -273,6 +275,51 @@ def init_db() -> None:
                 FOREIGN KEY(asset_id) REFERENCES assets(id)
             );
 
+            CREATE TABLE IF NOT EXISTS docx_workflow_runs (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                product_name TEXT NOT NULL,
+                material TEXT NOT NULL,
+                style_key TEXT NOT NULL,
+                product_asset_id TEXT NOT NULL,
+                model_asset_id TEXT NOT NULL DEFAULT '',
+                fit_asset_id TEXT NOT NULL DEFAULT '',
+                fit_front_asset_id TEXT NOT NULL DEFAULT '',
+                fit_side_asset_id TEXT NOT NULL DEFAULT '',
+                fit_back_asset_id TEXT NOT NULL DEFAULT '',
+                accessory_asset_id TEXT DEFAULT '',
+                scene_asset_id TEXT NOT NULL DEFAULT '',
+                pose_asset_id TEXT DEFAULT '',
+                image_model TEXT DEFAULT '',
+                size TEXT NOT NULL DEFAULT '1024x1024',
+                quality TEXT NOT NULL DEFAULT 'high',
+                status TEXT NOT NULL DEFAULT 'draft',
+                error TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS docx_workflow_steps (
+                id TEXT PRIMARY KEY,
+                run_id TEXT NOT NULL,
+                stage_id TEXT NOT NULL,
+                image_no INTEGER NOT NULL,
+                generation_order INTEGER NOT NULL,
+                title TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                input_asset_ids_json TEXT NOT NULL,
+                input_step_ids_json TEXT NOT NULL,
+                input_refs_json TEXT NOT NULL DEFAULT '[]',
+                image_path TEXT DEFAULT '',
+                params_json TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'pending',
+                error TEXT DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(run_id) REFERENCES docx_workflow_runs(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS project_workflow_steps (
                 id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL,
@@ -309,6 +356,8 @@ def init_db() -> None:
                 selected_at TEXT NOT NULL,
                 notes TEXT DEFAULT '',
                 model_description TEXT DEFAULT '',
+                asset_type TEXT DEFAULT '',
+                rag_role TEXT DEFAULT '',
                 FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
             );
 
@@ -352,6 +401,24 @@ def migrate_existing_db(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE rag_reference_selections ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0")
     if rag_columns and "model_description" not in rag_columns:
         conn.execute("ALTER TABLE rag_reference_selections ADD COLUMN model_description TEXT DEFAULT ''")
+    if rag_columns and "asset_type" not in rag_columns:
+        conn.execute("ALTER TABLE rag_reference_selections ADD COLUMN asset_type TEXT DEFAULT ''")
+    if rag_columns and "rag_role" not in rag_columns:
+        conn.execute("ALTER TABLE rag_reference_selections ADD COLUMN rag_role TEXT DEFAULT ''")
+    # Docx workflow runs: track download status
+    run_columns = table_columns(conn, "docx_workflow_runs")
+    if run_columns and "downloaded_at" not in run_columns:
+        conn.execute("ALTER TABLE docx_workflow_runs ADD COLUMN downloaded_at TEXT DEFAULT ''")
+    if run_columns and "pose_asset_id" not in run_columns:
+        conn.execute("ALTER TABLE docx_workflow_runs ADD COLUMN pose_asset_id TEXT DEFAULT ''")
+    for run_col, run_def in [
+        ("fit_front_asset_id", "TEXT NOT NULL DEFAULT ''"),
+        ("fit_side_asset_id", "TEXT NOT NULL DEFAULT ''"),
+        ("fit_back_asset_id", "TEXT NOT NULL DEFAULT ''"),
+        ("accessory_asset_id", "TEXT DEFAULT ''"),
+    ]:
+        if run_col not in run_columns:
+            conn.execute(f"ALTER TABLE docx_workflow_runs ADD COLUMN {run_col} {run_def}")
     # Project-level workflow fields
     project_cols = table_columns(conn, "projects")
     for col, definition in [
@@ -364,6 +431,7 @@ def migrate_existing_db(conn: sqlite3.Connection) -> None:
         ("fit_front_asset_id", "TEXT DEFAULT ''"),
         ("fit_side_asset_id", "TEXT DEFAULT ''"),
         ("fit_back_asset_id", "TEXT DEFAULT ''"),
+        ("accessory_asset_id", "TEXT DEFAULT ''"),
         ("scene_asset_id", "TEXT DEFAULT ''"),
         ("accessory_asset_id", "TEXT DEFAULT ''"),
         ("pose_asset_id", "TEXT DEFAULT ''"),

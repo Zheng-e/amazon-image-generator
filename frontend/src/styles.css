@@ -461,6 +461,55 @@ figcaption small {
   padding-top: 14px;
 }
 
+.docx-ref-overview {
+  margin-top: 12px;
+  padding: 8px 10px;
+  background: #f0f7ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+}
+
+.docx-ref-overview strong {
+  font-size: 12px;
+  color: #1e40af;
+}
+
+.docx-ref-overview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.docx-ref-overview-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 56px;
+}
+
+.docx-ref-overview-item img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid #93c5fd;
+  background: #fff;
+  cursor: pointer;
+}
+
+.docx-ref-overview-item span {
+  font-size: 10px;
+  color: #475569;
+  text-align: center;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 56px;
+}
+
 .workflow-step-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
@@ -699,17 +748,84 @@ figcaption small {
   font-weight: 700;
 }
 
-.rag-search-grid {
+.rag-search-split {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 110px minmax(220px, 0.7fr) auto;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.rag-search-panel {
+  display: grid;
   gap: 12px;
+  align-content: start;
+}
+
+.rag-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.rag-panel-head strong {
+  font-size: 14px;
+  color: #1e3a5f;
+}
+
+.rag-panel-controls {
+  display: flex;
+  gap: 8px;
   align-items: end;
+}
+
+.rag-panel-controls .stacked-field {
+  flex: 1 1 auto;
+}
+
+.rag-panel-controls .stacked-field.narrow {
+  flex: 0 0 80px;
+}
+
+.rag-panel-controls button {
+  flex: 0 0 auto;
+  height: 34px;
 }
 
 .rag-results-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
+}
+
+.rag-pagination {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.rag-pagination small {
+  color: #64748b;
+}
+
+.rag-pagination button {
+  padding: 4px 12px;
+  font-size: 12px;
+  border: 1px solid #94a3b8;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.rag-pagination button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.rag-pagination button:not(:disabled):hover {
+  background: #f1f5f9;
 }
 
 .rag-card {
@@ -738,6 +854,34 @@ figcaption small {
 .muted {
   color: #64748b;
   font-size: 12px;
+}
+
+.rag-use-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.rag-use-buttons button {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid #dbe3ef;
+  background: #f0f9ff;
+  color: #1e40af;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.rag-use-buttons button:hover {
+  background: #dbeafe;
+}
+
+.rag-use-buttons button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .rag-reference-pool {
@@ -800,12 +944,39 @@ figcaption small {
   color: #334155;
 }
 
-.step-rag-refs {
+.step-pose-ref {
   margin-top: 8px;
   padding: 8px;
   background: #f8fafc;
   border-radius: 6px;
   border: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.step-pose-ref strong {
+  font-size: 12px;
+  color: #334155;
+  flex: 0 0 auto;
+}
+
+.step-pose-ref select {
+  font-size: 12px;
+  padding: 4px 8px;
+  border: 1px solid #dbe3ef;
+  border-radius: 4px;
+  min-width: 160px;
+}
+
+.step-pose-thumb {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #fff;
+  border: 1px solid #93c5fd;
 }
 
 .step-base-refs {
@@ -869,132 +1040,6 @@ figcaption small {
   color: #3b82f6;
   display: block;
   margin-top: 2px;
-}
-
-.step-pose-ref {
-  margin-top: 8px;
-  padding: 8px;
-  background: #fefce8;
-  border-radius: 6px;
-  border: 1px solid #fde68a;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.step-pose-ref strong {
-  font-size: 12px;
-  color: #92400e;
-  white-space: nowrap;
-}
-
-.step-pose-ref select {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  padding: 4px 6px;
-}
-
-.pose-preview {
-  margin-top: 8px;
-  padding: 8px;
-  background: #fefce8;
-  border-radius: 6px;
-  border: 1px solid #fde68a;
-}
-
-.pose-preview strong {
-  font-size: 12px;
-  color: #92400e;
-  display: block;
-  margin-bottom: 6px;
-}
-
-.pose-preview-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.pose-preview-item {
-  width: 80px;
-  margin: 0;
-}
-
-.pose-preview-item img {
-  width: 80px;
-  height: 80px;
-  object-fit: cover;
-  border-radius: 4px;
-  border: 1px solid #e2e8f0;
-}
-
-.pose-preview-item figcaption {
-  font-size: 10px;
-  color: #64748b;
-  text-align: center;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  margin-top: 2px;
-}
-
-.step-rag-refs strong {
-  font-size: 12px;
-  color: #334155;
-  display: block;
-  margin-bottom: 6px;
-}
-
-.step-rag-ref-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  padding: 6px 0;
-  border-bottom: 1px solid #e2e8f0;
-}
-
-.step-rag-ref-item:last-child {
-  border-bottom: none;
-}
-
-.step-rag-thumb {
-  width: 48px;
-  height: 48px;
-  object-fit: cover;
-  border-radius: 4px;
-  background: #fff;
-  flex: 0 0 48px;
-}
-
-.step-rag-ref-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.step-rag-ref-text span {
-  font-size: 12px;
-  font-weight: 600;
-  color: #1e293b;
-  display: block;
-}
-
-.step-rag-ref-text small {
-  font-size: 11px;
-  color: #64748b;
-  display: block;
-  margin-top: 2px;
-}
-
-.step-rag-ref-item .icon-btn {
-  flex: 0 0 auto;
 }
 
 .step-rag-refs .muted {
@@ -1227,8 +1272,11 @@ figcaption small {
 }
 
 @media (max-width: 900px) {
-  .rag-search-grid {
+  .rag-search-split {
     grid-template-columns: 1fr;
+  }
+  .rag-panel-controls {
+    flex-wrap: wrap;
   }
   .centered-card.wide-card {
     width: 100%;
@@ -1308,5 +1356,56 @@ figcaption small {
   font-size: 11px;
   color: #6d6a62;
   margin-top: 2px;
+}
+
+/* RAG asset type badges */
+.rag-type-badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  vertical-align: middle;
+}
+
+.rag-type-model {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.rag-type-other {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+/* RAG role badges */
+.rag-role-badge {
+  display: inline-block;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-weight: 600;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+
+.rag-role-model {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+
+.rag-role-scene_style {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.rag-role-pose {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.rag-role-accessory {
+  background: #dcfce7;
+  color: #166534;
 }
 
