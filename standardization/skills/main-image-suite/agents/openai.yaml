@@ -1,0 +1,4 @@
+interface:
+  display_name: "商品九图生成"
+  short_description: "检索参考素材并规划、生成、跟踪和下载完整的商品九图套图"
+  default_prompt: "使用图片知识库和主图生成 MCP，为商品规划并生成一致的九图套图，跟踪生成状态并下载结果。"

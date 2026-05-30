@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "main-image-suite": {
+      "command": "powershell",
+      "args": [
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "C:\\Users\\ASUS\\Desktop\\主图生成\\standardization\\mcp-server\\start_main_image_stdio.ps1"
+      ]
+    },
+    "image-knowledge-base": {
+      "command": "powershell",
+      "args": [
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "C:\\Users\\ASUS\\Desktop\\主图生成\\standardization\\mcp-server\\start_rag_stdio.ps1"
+      ]
+    }
+  }
+}
