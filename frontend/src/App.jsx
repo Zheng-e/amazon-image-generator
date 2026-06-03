@@ -10,7 +10,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const API = import.meta.env.VITE_API_BASE || window.location.origin;
 
@@ -385,18 +385,6 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
     return () => { if (formSetterRef) formSetterRef.current = null; };
   }, [formSetterRef]);
 
-  const refreshWorkflow = useCallback(() => {
-    if (!project?.id) return;
-    request(`/api/projects/${project.id}/workflow`)
-      .then(setWorkflow)
-      .catch(() => {});
-  }, [project?.id]);
-
-  useEffect(() => {
-    if (workflowRefreshRef) workflowRefreshRef.current = refreshWorkflow;
-    return () => { if (workflowRefreshRef) workflowRefreshRef.current = null; };
-  }, [workflowRefreshRef, refreshWorkflow]);
-
   useEffect(() => {
     request("/api/docx-workflow/styles").then(setStyles).catch(() => setStyles([]));
     request("/api/models/image").then((models) => {
@@ -624,6 +612,11 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
       setWorkflow(null);
     }
   };
+
+  useEffect(() => {
+    if (workflowRefreshRef) workflowRefreshRef.current = refreshWorkflow;
+    return () => { if (workflowRefreshRef) workflowRefreshRef.current = null; };
+  }, [workflowRefreshRef, refreshWorkflow]);
 
   const updateStepPoseRef = async (step, newAssetId) => {
     setBusy(true);
