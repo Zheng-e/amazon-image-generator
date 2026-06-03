@@ -715,19 +715,6 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
         <Upload size={16} />
         上传并填入参考图
       </button>
-      {assets.filter((a) => a.slot === "pose_reference").length ? (
-        <div className="pose-preview">
-          <strong>已上传姿势参考图：</strong>
-          <div className="pose-preview-list">
-            {assets.filter((a) => a.slot === "pose_reference").map((asset) => (
-              <figure key={asset.id} className="pose-preview-item">
-                <img src={`${API}${asset.url}`} alt={asset.original_name} />
-                <figcaption>{asset.original_name}</figcaption>
-              </figure>
-            ))}
-          </div>
-        </div>
-      ) : null}
       <div className="docx-config-grid">
         <label className={`stacked-field${!form.product_name.trim() ? " field-missing" : ""}`}>
           <span>产品名称 <i className="required-star">*</i></span>
