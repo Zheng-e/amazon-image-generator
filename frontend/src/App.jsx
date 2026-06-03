@@ -361,7 +361,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
     product_name: "",
     material: "",
     style_key: "natural_fashion",
-    image_model: "gpt-image-2-client",
+    image_model: "gpt-image-2",
     size: "1024x1024",
     quality: "high",
     product_asset_id: "",
@@ -401,7 +401,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
     request("/api/docx-workflow/styles").then(setStyles).catch(() => setStyles([]));
     request("/api/models/image").then((models) => {
       setImageModels(models);
-      setForm((current) => current.image_model ? current : { ...current, image_model: models[0]?.model || "gpt-image-2-client" });
+      setForm((current) => current.image_model ? current : { ...current, image_model: models[0]?.model || "gpt-image-2" });
     }).catch(() => setImageModels([]));
   }, []);
 
@@ -427,7 +427,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
       product_name: current.product_name || workflow.product_name || "",
       material: current.material || workflow.material || "",
       style_key: current.style_key || workflow.style_key || "natural_fashion",
-      image_model: current.image_model || workflow.image_model || "gpt-image-2-client",
+      image_model: current.image_model || workflow.image_model || "gpt-image-2",
       size: current.size || workflow.size || "1024x1024",
       quality: current.quality || workflow.quality || "high",
       product_asset_id: current.product_asset_id || workflow.product_asset_id || "",
@@ -744,7 +744,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
                 {item.model} ({item.key_count} keys · {item.api_type})
               </option>
             )) : (
-              <option value="gpt-image-2-client">gpt-image-2-client</option>
+              <option value="gpt-image-2">gpt-image-2</option>
             )}
           </select>
           <small>{imageModels.find((item) => item.model === form.image_model)?.key_count || 0} 个 key，将按模型独立轮换。</small>

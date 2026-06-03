@@ -26,7 +26,7 @@ pip install -r requirements.txt
 在项目根目录创建 `api.txt`，格式如下（模型名 + 对应的 API 密钥，每行一个）：
 
 ```
-gpt-image-2-client
+gpt-image-2
 sk-xxxxxxxxxxxxxxxx
 sk-yyyyyyyyyyyyyyyy
 ```

@@ -40,8 +40,8 @@ npm run build     # 构建产物在 frontend/dist/，需手动复制到 backend/
 - **`run_backend.py`** — 入口文件，启动 uvicorn，加载 `backend.app.main:app`
 - **`backend/app/main.py`** — 所有 API 端点。单文件 FastAPI 应用，包含项目/素材/工作流的增删改查和图片生成编排逻辑
 - **`backend/app/ai_clients.py`** — AI API 调用封装层，支持两种接口：
-  - `openai_images_edits` — multipart 图片编辑接口（gpt-image-2、gpt-image-2-client）
-  - `chat_completions_image` — chat completions 输出图片（gemini-3.1-flash-image-preview）
+  - `openai_images_edits` — multipart 图片编辑接口（gpt-image-2）
+  - `gemini_native` — Gemini 原生生图接口（gemini-3-pro-image-preview、gemini-3.1-flash-image-preview）
   - API 密钥从项目根目录的 `api.txt`（图片模型）和 `api key.txt`（分析/文字模型）加载，按模型分组，通过 `KeyRotator` 轮询使用
 - **`backend/app/db.py`** — SQLite 数据库层。数据库路径 `output/workbench/design_workbench.db`，使用 WAL 模式。`row_to_dict()` 自动反序列化 `*_json` 后缀的列。通过 `migrate_existing_db()` 做增量迁移
 - **`backend/app/docx_workflow.py`** — 9 步工作流定义，包含提示词模板和 3 种摄影风格（`natural_fashion`、`cinematic_documentary`、`street_film`）
@@ -74,7 +74,7 @@ npm run build     # 构建产物在 frontend/dist/，需手动复制到 backend/
 
 在项目根目录创建 `api.txt`，格式为模型名后跟密钥，每行一个：
 ```
-gpt-image-2-client
+gpt-image-2
 sk-xxxxx
 sk-yyyyy
 ```
