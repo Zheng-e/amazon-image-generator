@@ -80,7 +80,7 @@ def load_settings() -> ApiSettings:
     image_model = os.getenv("IMAGE_MODEL", "gpt-image-2")
     text_model = os.getenv("TEXT_MODEL", "gemini-3.1-flash-image-preview")
     return ApiSettings(
-        text_api_url=os.getenv("TEXT_API_URL", "https://147ai.com/v1/chat/completions"),
+        text_api_url=os.getenv("TEXT_API_URL", "https://aifast.site/v1/chat/completions"),
         text_model=text_model,
         text_keys=_split_env_keys(os.getenv("TEXT_API_KEYS")) or groups.get(text_model, []) or groups.get("gemini-3.1-flash-image-preview", []),
         image_api_url=os.getenv("IMAGE_API_URL", "https://aifast.site/v1/images/edits"),
@@ -225,7 +225,7 @@ def call_text_model(
                 headers={
                     "Accept": "application/json",
                     "Content-Type": "application/json",
-                    "Authorization": key,
+                    "Authorization": f"Bearer {key}",
                 },
                 json=body,
                 timeout=180,
