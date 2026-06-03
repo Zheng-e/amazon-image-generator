@@ -514,7 +514,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
   };
 
   const savePrompt = async (stepId, prompt) => {
-    const pkg = await request(`/api/projects/workflow/steps/${stepId}`, {
+    const updated = await request(`/api/projects/workflow/steps/${stepId}`, {
       method: "PATCH",
       body: JSON.stringify({ prompt }),
     });
