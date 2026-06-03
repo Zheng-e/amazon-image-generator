@@ -455,6 +455,28 @@ figcaption small {
   margin-top: 14px;
 }
 
+.required-star {
+  color: #e74c3c;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.field-missing input,
+.field-missing select {
+  border-color: #e74c3c;
+  box-shadow: 0 0 0 1px rgba(231, 76, 60, 0.25);
+}
+
+.validation-hint {
+  margin-top: 6px;
+  padding: 6px 10px;
+  background: #fdf2f2;
+  border: 1px solid #f5c6cb;
+  border-radius: 6px;
+  color: #a94442;
+  font-size: 13px;
+}
+
 .docx-preview {
   margin-top: 14px;
   border-top: 1px solid #d7e0e5;

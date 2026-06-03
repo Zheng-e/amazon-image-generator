@@ -354,7 +354,7 @@ function DocxAssetSelect({ label, assets, slotHint, value, onChange }) {
   );
 }
 
-function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef }) {
+function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef, workflowRefreshRef }) {
   const [styles, setStyles] = useState([]);
   const [imageModels, setImageModels] = useState([]);
   const [form, setForm] = useState({
@@ -445,20 +445,22 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
     return () => clearInterval(interval);
   }, [workflow?.project_id, workflow?.workflow_status]);
 
-  const ready =
-    form.product_name.trim() &&
-    form.material.trim() &&
-    form.style_key &&
-    form.image_model &&
-    form.size &&
-    form.quality &&
-    form.product_asset_id &&
-    form.model_asset_id &&
-    form.scene_asset_id &&
-    form.fit_front_asset_id &&
-    form.fit_side_asset_id &&
-    form.fit_back_asset_id &&
-    form.accessory_asset_id;
+  const missingFields = [
+    !form.product_name.trim() && "产品名称",
+    !form.material.trim() && "材质",
+    !form.style_key && "输出规格风格",
+    !form.image_model && "生图模型",
+    !form.size && "图片尺寸",
+    !form.quality && "图片质量",
+    !form.product_asset_id && "产品图",
+    !form.model_asset_id && "模特参考图",
+    !form.scene_asset_id && "场景风格参考图",
+    !form.fit_front_asset_id && "上身正面参考图",
+    !form.fit_side_asset_id && "上身侧面参考图",
+    !form.fit_back_asset_id && "上身背面参考图",
+    !form.accessory_asset_id && "配饰参考图",
+  ].filter(Boolean);
+  const ready = missingFields.length === 0;
 
   const initWorkflow = async () => {
     return request(`/api/projects/${project.id}/workflow`, {
@@ -616,6 +618,11 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
     }
   };
 
+  useEffect(() => {
+    if (workflowRefreshRef) workflowRefreshRef.current = refreshWorkflow;
+    return () => { if (workflowRefreshRef) workflowRefreshRef.current = null; };
+  }, [workflowRefreshRef, refreshWorkflow]);
+
   const updateStepPoseRef = async (step, newAssetId) => {
     setBusy(true);
     try {
@@ -722,12 +729,12 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
         </div>
       ) : null}
       <div className="docx-config-grid">
-        <label className="stacked-field">
-          <span>产品名称</span>
+        <label className={`stacked-field${!form.product_name.trim() ? " field-missing" : ""}`}>
+          <span>产品名称 <i className="required-star">*</i></span>
           <input placeholder="例如：白色双层可调节吊带背心" value={form.product_name} onChange={(e) => setForm({ ...form, product_name: e.target.value })} />
         </label>
-        <label className="stacked-field">
-          <span>材质</span>
+        <label className={`stacked-field${!form.material.trim() ? " field-missing" : ""}`}>
+          <span>材质 <i className="required-star">*</i></span>
           <input placeholder="例如：SmoothSpandexfabric，Plainweave" value={form.material} onChange={(e) => setForm({ ...form, material: e.target.value })} />
         </label>
         <label className="stacked-field">
@@ -792,6 +799,11 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
           一键下载 9 张图
         </button>
       </div>
+      {!ready && missingFields.length > 0 && (
+        <div className="validation-hint">
+          请填写以下必填项：{missingFields.join("、")}
+        </div>
+      )}
       {(() => {
         const refFields = [
           { id: form.product_asset_id, label: "产品图" },
@@ -1025,6 +1037,7 @@ export default function App() {
   const [projectDetail, setProjectDetail] = useState(null);
   const [error, setError] = useState("");
   const docxFormSetter = useRef(null);
+  const workflowRefreshRef = useRef(null);
 
   const loadUsers = async () => {
     try {
@@ -1152,17 +1165,19 @@ export default function App() {
               project={selectedProject}
               refreshProject={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)}
               onAssetCreated={(asset, slot) => {
-                if (!docxFormSetter.current) return;
-                const fieldMap = {
-                  model_reference: "model_asset_id",
-                  scene_reference: "scene_asset_id",
-                  pose_reference: "pose_reference",
-                  accessory_reference: "accessory_asset_id",
-                };
-                const field = fieldMap[slot];
-                if (field && field !== "pose_reference") {
-                  docxFormSetter.current((prev) => ({ ...prev, [field]: asset.id }));
+                if (docxFormSetter.current) {
+                  const fieldMap = {
+                    model_reference: "model_asset_id",
+                    scene_reference: "scene_asset_id",
+                    pose_reference: "pose_reference",
+                    accessory_reference: "accessory_asset_id",
+                  };
+                  const field = fieldMap[slot];
+                  if (field && field !== "pose_reference") {
+                    docxFormSetter.current((prev) => ({ ...prev, [field]: asset.id }));
+                  }
                 }
+                if (workflowRefreshRef.current) workflowRefreshRef.current();
               }}
             />
             <DocxWorkflowPanel
@@ -1171,6 +1186,7 @@ export default function App() {
               refresh={() => request(`/api/projects/${selectedProject.id}`).then(setProjectDetail)}
               onDownload={() => loadProjects(selectedUser.id)}
               formSetterRef={docxFormSetter}
+              workflowRefreshRef={workflowRefreshRef}
             />
           </div>
         ) : (
