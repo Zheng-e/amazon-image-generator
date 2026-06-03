@@ -32,6 +32,7 @@ class ApiSettings:
     image_api_url: str
     image_model: str
     image_keys: list[str]
+    gemini_api_url: str
     analysis_models: dict[str, list[str]]
 
 
@@ -86,6 +87,7 @@ def load_settings() -> ApiSettings:
         image_api_url=os.getenv("IMAGE_API_URL", "https://aifast.site/v1/images/edits"),
         image_model=image_model,
         image_keys=_split_env_keys(os.getenv("IMAGE_KEYS")) or _split_env_keys(os.getenv("IMAGE_API_KEYS")) or groups.get(image_model, []),
+        gemini_api_url=os.getenv("GEMINI_API_URL", "https://aifast.site"),
         analysis_models=analysis_groups,
     )
 
@@ -180,18 +182,18 @@ def available_image_models() -> list[dict[str, Any]]:
     settings = load_settings()
     groups = _read_api_file(API_FILE)
     all_groups: dict[str, list[str]] = {**settings.analysis_models, **groups}
-    preferred = ["gpt-image-2", "gemini-3.1-flash-image-preview"]
+    preferred = ["gpt-image-2", "gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview"]
     models: list[dict[str, Any]] = []
     for model in preferred:
         keys = _keys_for_image_model(settings, model)
         if keys:
-            api_type = "chat_completions_image" if "gemini" in model else "openai_images_edits"
+            api_type = "gemini_native" if "gemini" in model else "openai_images_edits"
             models.append({"model": model, "key_count": len(keys), "api_type": api_type})
     for model, keys in all_groups.items():
         if model in preferred or not keys:
             continue
         if "image" in model:
-            api_type = "chat_completions_image" if "gemini" in model else "openai_images_edits"
+            api_type = "gemini_native" if "gemini" in model else "openai_images_edits"
             models.append({"model": model, "key_count": len(keys), "api_type": api_type})
     return models
 
@@ -254,6 +256,17 @@ def call_text_model(
 
 
 def _extract_b64_from_image_response(result: dict[str, Any]) -> str:
+    # Gemini native format: candidates[].content.parts[].inline_data.data
+    candidates = result.get("candidates") or []
+    if candidates:
+        for candidate in candidates:
+            content = candidate.get("content") or {}
+            for part in content.get("parts") or []:
+                inline = part.get("inline_data") or {}
+                if inline.get("data"):
+                    return str(inline["data"])
+
+    # OpenAI images/edits format: data[].b64_json or data[].image_url.url
     data = result.get("data") or []
     if data and isinstance(data, list):
         first = data[0] or {}
@@ -263,6 +276,7 @@ def _extract_b64_from_image_response(result: dict[str, Any]) -> str:
         if isinstance(url, str) and url.startswith("data:image"):
             return url.split(",", 1)[1]
 
+    # Chat completions format: choices[].message.images[] or content
     choices = result.get("choices") or []
     if choices:
         message = choices[0].get("message") or {}
@@ -374,31 +388,32 @@ def _call_chat_image_model(
 ) -> dict[str, Any]:
     settings = load_settings()
     rotator = _get_image_rotator(model, keys)
-    content: list[dict[str, Any]] = [{"type": "text", "text": prompt}]
+    parts: list[dict[str, Any]] = [{"text": prompt}]
     for img_path in image_paths[:6]:
-        content.append({"type": "image_url", "image_url": {"url": image_to_data_url(img_path)}})
+        data_url = image_to_data_url(img_path)
+        b64_data = data_url.split(",", 1)[1] if "," in data_url else data_url
+        mime = data_url.split(";")[0].split(":")[1] if data_url.startswith("data:") else "image/jpeg"
+        parts.append({"inline_data": {"mime_type": mime, "data": b64_data}})
     body = {
-        "model": model,
-        "stream": False,
-        "messages": [{"role": "user", "content": content}],
-        "extra_body": {
-            "google": {
-                "image_config": {
-                    "aspect_ratio": "1:1",
-                    "image_size": "1K",
-                }
-            }
+        "contents": [{"role": "user", "parts": parts}],
+        "generationConfig": {
+            "responseModalities": ["TEXT", "IMAGE"],
+            "imageConfig": {
+                "aspectRatio": "1:1",
+                "imageSize": "1K",
+            },
         },
     }
+    url = f"{settings.gemini_api_url}/v1beta/models/{model}:generateContent"
     last_exc: Exception | None = None
     for attempt in range(3):
         key = rotator.next()
         resp = _session.post(
-            settings.text_api_url,
+            url,
             headers={
                 "Accept": "application/json",
                 "Content-Type": "application/json",
-                "Authorization": key,
+                "Authorization": f"Bearer {key}",
             },
             json=body,
             timeout=360,
@@ -426,7 +441,7 @@ def _call_chat_image_model(
         return {
             "b64_json": _extract_b64_from_image_response(result),
             "model": model,
-            "api_type": "chat_completions_image",
+            "api_type": "gemini_native",
             "params": {"aspect_ratio": "1:1", "image_size": "1K"},
         }
     raise last_exc  # type: ignore[misc]
