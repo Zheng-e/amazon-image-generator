@@ -380,14 +380,29 @@ def _call_openai_image_edits(
     raise last_exc  # type: ignore[misc]
 
 
+def _size_to_gemini_config(size: str) -> dict[str, str]:
+    try:
+        w, h = (int(x) for x in size.split("x"))
+    except (ValueError, AttributeError):
+        return {"aspectRatio": "1:1", "imageSize": "1K"}
+    from math import gcd
+    d = gcd(w, h)
+    aspectRatio = f"{w // d}:{h // d}"
+    max_dim = max(w, h)
+    imageSize = "2K" if max_dim > 1536 else "1K"
+    return {"aspectRatio": aspectRatio, "imageSize": imageSize}
+
+
 def _call_chat_image_model(
     prompt: str,
     image_paths: list[Path],
     model: str,
     keys: list[str],
+    size: str = "1024x1024",
 ) -> dict[str, Any]:
     settings = load_settings()
     rotator = _get_image_rotator(model, keys)
+    gemini_cfg = _size_to_gemini_config(size)
     parts: list[dict[str, Any]] = [{"text": prompt}]
     for img_path in image_paths[:6]:
         data_url = image_to_data_url(img_path)
@@ -399,8 +414,8 @@ def _call_chat_image_model(
         "generationConfig": {
             "responseModalities": ["TEXT", "IMAGE"],
             "imageConfig": {
-                "aspectRatio": "1:1",
-                "imageSize": "1K",
+                "aspectRatio": gemini_cfg["aspectRatio"],
+                "imageSize": gemini_cfg["imageSize"],
             },
         },
     }
@@ -442,7 +457,7 @@ def _call_chat_image_model(
             "b64_json": _extract_b64_from_image_response(result),
             "model": model,
             "api_type": "gemini_native",
-            "params": {"aspect_ratio": "1:1", "image_size": "1K"},
+            "params": {"aspect_ratio": gemini_cfg["aspectRatio"], "image_size": gemini_cfg["imageSize"]},
         }
     raise last_exc  # type: ignore[misc]
 
@@ -458,5 +473,5 @@ def call_image_model(
     selected_model = model or settings.image_model
     keys = _keys_for_image_model(settings, selected_model)
     if "gemini" in selected_model:
-        return _call_chat_image_model(prompt, image_paths, selected_model, keys)
+        return _call_chat_image_model(prompt, image_paths, selected_model, keys, size=size)
     return _call_openai_image_edits(prompt, image_paths, size, quality, selected_model, keys)
