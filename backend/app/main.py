@@ -608,7 +608,7 @@ def api_rag_search(payload: RagSearchIn) -> dict[str, Any]:
     )
 
 
-@app.get("/api/rag/images/{image_id}")
+@app.api_route("/api/rag/images/{image_id}", methods=["GET", "HEAD"])
 def api_rag_image(image_id: str) -> Response:
     content, content_type = rag_image_response(image_id)
     return Response(content=content, media_type=content_type)
