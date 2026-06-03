@@ -77,13 +77,13 @@ def _read_api_file(path: Path = API_FILE) -> dict[str, list[str]]:
 def load_settings() -> ApiSettings:
     groups = _read_api_file(API_FILE)
     analysis_groups = _read_api_file(ANALYSIS_API_FILE)
-    image_model = os.getenv("IMAGE_MODEL", "gpt-image-2-client")
+    image_model = os.getenv("IMAGE_MODEL", "gpt-image-2")
     text_model = os.getenv("TEXT_MODEL", "gemini-3.1-flash-image-preview")
     return ApiSettings(
         text_api_url=os.getenv("TEXT_API_URL", "https://147ai.com/v1/chat/completions"),
         text_model=text_model,
         text_keys=_split_env_keys(os.getenv("TEXT_API_KEYS")) or groups.get(text_model, []) or groups.get("gemini-3.1-flash-image-preview", []),
-        image_api_url=os.getenv("IMAGE_API_URL", "https://147ai.com/v1/images/edits"),
+        image_api_url=os.getenv("IMAGE_API_URL", "https://aifast.site/v1/images/edits"),
         image_model=image_model,
         image_keys=_split_env_keys(os.getenv("IMAGE_KEYS")) or _split_env_keys(os.getenv("IMAGE_API_KEYS")) or groups.get(image_model, []),
         analysis_models=analysis_groups,
@@ -180,7 +180,7 @@ def available_image_models() -> list[dict[str, Any]]:
     settings = load_settings()
     groups = _read_api_file(API_FILE)
     all_groups: dict[str, list[str]] = {**settings.analysis_models, **groups}
-    preferred = ["gpt-image-2-client", "gpt-image-2", "gemini-3.1-flash-image-preview"]
+    preferred = ["gpt-image-2", "gemini-3.1-flash-image-preview"]
     models: list[dict[str, Any]] = []
     for model in preferred:
         keys = _keys_for_image_model(settings, model)
@@ -313,16 +313,13 @@ def _call_openai_image_edits(
                 settings.image_api_url,
                 headers={
                     "Accept": "application/json",
-                    "Authorization": key,
+                    "Authorization": f"Bearer {key}",
                 },
                 files=files,
                 data={
                     "model": model,
                     "prompt": prompt,
                     "size": size,
-                    "quality": quality,
-                    "input_fidelity": "high",
-                    "moderation": "low",
                     "n": "1",
                 },
                 timeout=360,
@@ -340,7 +337,7 @@ def _call_openai_image_edits(
                 "b64_json": _extract_b64_from_image_response(result),
                 "model": model,
                 "api_type": "openai_images_edits",
-                "params": {"size": size, "quality": quality, "input_fidelity": "high", "moderation": "low"},
+                "params": {"size": size},
             }
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
             last_exc = exc
