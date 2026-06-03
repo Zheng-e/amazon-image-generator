@@ -747,7 +747,7 @@ function DocxWorkflowPanel({ project, assets, refresh, onDownload, formSetterRef
               <option value="gpt-image-2">gpt-image-2</option>
             )}
           </select>
-          <small>{imageModels.find((item) => item.model === form.image_model)?.key_count || 0} 个 key，将按模型独立轮换。</small>
+          <small>{imageModels.length ? `${imageModels.find((item) => item.model === form.image_model)?.key_count || 0} 个 key，将按模型独立轮换。` : "加载中..."}</small>
         </label>
         <label className="stacked-field">
           <span>图片尺寸</span>
