@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import mimetypes
 import re
 import shutil
@@ -11,6 +12,13 @@ import sys
 import threading
 import time
 import zipfile
+
+log = logging.getLogger("workbench")
+log.setLevel(logging.INFO)
+if not log.handlers:
+    _handler = logging.StreamHandler(sys.stdout)
+    _handler.setFormatter(logging.Formatter("[%(asctime)s] %(levelname)s %(message)s", datefmt="%H:%M:%S"))
+    log.addHandler(_handler)
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -642,6 +650,7 @@ def rag_to_asset(project_id: str, payload: RagToAssetIn) -> dict:
         )
         asset = fetch_one(conn, "SELECT * FROM assets WHERE id = ?", (asset_id,))
 
+    log.info("[RAG] 项目=%s 转资产 %s slot=%s 文件=%s", project_id[:8], asset_id[:8], slot, filename)
     return hydrate_asset(asset)
 
 
@@ -1138,8 +1147,10 @@ def _run_project_workflow_in_background(project_id: str, image_model: str | None
         if not step:
             return False
 
+        step_label = f"第{step.get('image_no', '?')}步 {step.get('stage_id', '?')}"
         prompt = step.get("prompt") or ""
         if not prompt.strip():
+            log.warning("[步骤] %s 提示词为空，跳过", step_label)
             with get_db() as conn:
                 conn.execute("UPDATE project_workflow_steps SET status = 'failed', error = '提示词为空', updated_at = ? WHERE id = ?", (now_iso(), step_id))
             return False
@@ -1162,11 +1173,15 @@ def _run_project_workflow_in_background(project_id: str, image_model: str | None
         with get_db() as conn:
             conn.execute("UPDATE project_workflow_steps SET status = 'running', error = '', updated_at = ? WHERE id = ?", (now_iso(), step_id))
 
+        log.info("[步骤] %s 开始 参考图=%d张", step_label, len(input_paths))
+
         retries = 3
         last_error = ""
         for attempt in range(retries):
             try:
+                t0 = time.time()
                 result = call_image_model(prompt=prompt, image_paths=[Path(p) for p in input_paths], model=image_model, size=size, quality=quality)
+                elapsed = time.time() - t0
                 step_dir = Path(DATA_DIR) / "projects" / project_id / "docx_workflow" / "_project_steps"
                 step_dir.mkdir(parents=True, exist_ok=True)
                 stage_id = re.sub(r"[^A-Za-z0-9_-]+", "_", step.get("stage_id") or "image").strip("_")
@@ -1189,17 +1204,21 @@ def _run_project_workflow_in_background(project_id: str, image_model: str | None
                         (str(out_path), to_json(params), now_iso(), step_id),
                     )
                 stage_output_paths[step["stage_id"]] = str(out_path)
+                log.info("[步骤] %s 完成 %.1fs -> %s", step_label, elapsed, filename)
                 return True
             except Exception as exc:
                 last_error = str(exc)[:500]
+                log.warning("[步骤] %s 第%d次失败: %s", step_label, attempt + 1, last_error[:120])
                 if attempt < retries - 1:
                     time.sleep(2 ** attempt)
 
+        log.error("[步骤] %s 最终失败: %s", step_label, last_error[:120])
         with get_db() as conn:
             conn.execute("UPDATE project_workflow_steps SET status = 'failed', error = ?, updated_at = ? WHERE id = ?", (last_error, now_iso(), step_id))
         return False
 
     stage_output_paths: dict[str, str] = {}
+    workflow_start = time.time()
 
     with get_db() as conn:
         step_rows = conn.execute(
@@ -1208,23 +1227,32 @@ def _run_project_workflow_in_background(project_id: str, image_model: str | None
         ).fetchall()
 
     steps_info = [{"id": r["id"], "stage_id": r["stage_id"], "order": r["generation_order"]} for r in step_rows]
+    log.info("[工作流] 项目=%s 共%d步 开始顺序执行前2步", project_id[:8], len(steps_info))
 
     for i in range(min(2, len(steps_info))):
         success = run_step(steps_info[i]["id"])
         if not success:
+            log.error("[工作流] 项目=%s 第%d步失败，终止", project_id[:8], i + 1)
             with get_db() as conn:
                 conn.execute("UPDATE projects SET workflow_status = 'failed', workflow_error = '步骤失败', updated_at = ? WHERE id = ?", (now_iso(), project_id))
             return
 
     parallel_steps = steps_info[2:]
     if parallel_steps:
+        log.info("[工作流] 项目=%s 开始并行执行剩余%d步", project_id[:8], len(parallel_steps))
         with ThreadPoolExecutor(max_workers=min(len(parallel_steps), 7)) as executor:
             futures = {executor.submit(run_step, s["id"]): s for s in parallel_steps}
+            results = []
             for future in as_completed(futures):
-                future.result()
+                results.append(future.result())
+        ok = sum(1 for r in results if r)
+        log.info("[工作流] 项目=%s 并行完成 %d/%d 成功", project_id[:8], ok, len(results))
 
+    elapsed = time.time() - workflow_start
     with get_db() as conn:
         update_project_workflow_status(conn, project_id)
+        final = row_to_dict(conn.execute("SELECT workflow_status FROM projects WHERE id = ?", (project_id,)).fetchone())
+    log.info("[工作流] 项目=%s 完成 状态=%s 总耗时=%.1fs", project_id[:8], final.get("workflow_status", "?"), elapsed)
 
 
 def _cleanup_project_task(project_id: str) -> None:
@@ -1300,6 +1328,8 @@ def generate_project_workflow(project_id: str, payload: DocxWorkflowGenerateIn) 
     size = payload.size or project.get("size") or "1024x1024"
     quality = payload.quality or project.get("quality") or "high"
     image_model = payload.image_model or project.get("image_model") or None
+
+    log.info("[生成] 项目=%s 模型=%s 尺寸=%s 质量=%s", project_id[:8], image_model, size, quality)
 
     thread = threading.Thread(
         target=_run_project_workflow_in_background,
@@ -1602,6 +1632,7 @@ def create_project(payload: ProjectIn) -> dict:
             "INSERT INTO projects (id, user_id, sku, category, name, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (project_id, payload.user_id or "default", sku, payload.category.strip(), name, payload.notes, ts, ts),
         )
+        log.info("[项目] 创建 %s SKU=%s 名称=%s", project_id[:8], sku, name)
         return fetch_one(conn, "SELECT * FROM projects WHERE id = ?", (project_id,))
 
 
@@ -1811,6 +1842,7 @@ def upload_assets(
                 ),
             )
             saved.append(hydrate_asset(fetch_one(conn, "SELECT * FROM assets WHERE id = ?", (asset_id,))))
+        log.info("[素材] 项目=%s 类型=%s 上传=%d张", project_id[:8], asset_type, len(saved))
         return saved
 
 

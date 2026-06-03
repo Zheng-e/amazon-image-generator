@@ -3,11 +3,14 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import mimetypes
 import os
 import struct
 import zlib
 from dataclasses import dataclass
+
+log = logging.getLogger("workbench")
 from pathlib import Path
 from typing import Any
 
@@ -217,11 +220,12 @@ def call_text_model(
     }
     body_bytes = json.dumps(body, ensure_ascii=False).encode("utf-8")
     img_count = sum(1 for m in messages for c in (m.get("content") or []) if isinstance(c, dict) and c.get("type") == "image_url")
-    print(f"[call_text_model] model={selected_model} images={img_count} payload={len(body_bytes) / 1024:.0f}KB")
+    log.info("[文字] 模型=%s 图片=%d 大小=%dKB", selected_model, img_count, len(body_bytes) / 1024)
     last_exc: Exception | None = None
     for attempt in range(4):
         key = rotator.next()
         try:
+            t0 = _time.time()
             resp = _session.post(
                 settings.text_api_url,
                 headers={
@@ -233,10 +237,11 @@ def call_text_model(
                 timeout=180,
             )
             resp.raise_for_status()
+            log.info("[文字] 完成 %.1fs 状态=%d", _time.time() - t0, resp.status_code)
             break
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
             last_exc = exc
-            print(f"[call_text_model] attempt {attempt + 1} failed: {exc}")
+            log.warning("[文字] 第%d次失败: %s", attempt + 1, str(exc)[:100])
             if attempt < 3:
                 _time.sleep(5 * (attempt + 1) + _random.uniform(0, 3))
                 continue
@@ -316,6 +321,7 @@ def _call_openai_image_edits(
     rotator = _get_image_rotator(model, keys)
     paths = list(image_paths) or [ensure_blank_canvas()]
     last_exc: Exception | None = None
+    log.info("[GPT] 模型=%s 尺寸=%s 参考图=%d张", model, size, len(paths))
     for attempt in range(3):
         key = rotator.next()
         files: list[tuple[str, tuple[str, Any, str]]] = []
@@ -323,6 +329,7 @@ def _call_openai_image_edits(
             for img_path in paths:
                 mime = mimetypes.guess_type(img_path.name)[0] or "image/png"
                 files.append(("image", (img_path.name, img_path.open("rb"), mime)))
+            t0 = _time.time()
             resp = requests.post(
                 settings.image_api_url,
                 headers={
@@ -347,6 +354,7 @@ def _call_openai_image_edits(
                     response=resp,
                 ) from exc
             result = resp.json()
+            log.info("[GPT] 完成 %.1fs", _time.time() - t0)
             return {
                 "b64_json": _extract_b64_from_image_response(result),
                 "model": model,
@@ -355,7 +363,7 @@ def _call_openai_image_edits(
             }
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
             last_exc = exc
-            print(f"[_call_openai_image_edits] attempt {attempt + 1} failed: {exc}")
+            log.warning("[GPT] 第%d次失败: %s", attempt + 1, str(exc)[:100])
             if attempt < 2:
                 _time.sleep(5 * (attempt + 1) + _random.uniform(0, 3))
                 continue
@@ -370,7 +378,7 @@ def _call_openai_image_edits(
             is_transient = status == 500 and ("unexpected end of JSON" in body or "bad_response_body" in body)
             if is_transient and attempt < 2:
                 last_exc = exc
-                print(f"[_call_openai_image_edits] attempt {attempt + 1} transient 500: {body[:200]}")
+                log.warning("[GPT] 第%d次临时500: %s", attempt + 1, body[:100])
                 _time.sleep(5 * (attempt + 1) + _random.uniform(0, 3))
                 continue
             raise
@@ -420,9 +428,11 @@ def _call_chat_image_model(
         },
     }
     url = f"{settings.gemini_api_url}/v1beta/models/{model}:generateContent"
+    log.info("[Gemini] 模型=%s 尺寸=%s 参考图=%d张", model, size, len(image_paths))
     last_exc: Exception | None = None
     for attempt in range(3):
         key = rotator.next()
+        t0 = _time.time()
         resp = _session.post(
             url,
             headers={
@@ -441,18 +451,19 @@ def _call_chat_image_model(
             is_transient = status == 500 and ("unexpected end of JSON" in detail or "bad_response_body" in detail)
             if is_transient and attempt < 2:
                 last_exc = exc
-                print(f"[_call_chat_image_model] attempt {attempt + 1} transient 500: {detail[:200]}")
+                log.warning("[Gemini] 第%d次临时500: %s", attempt + 1, detail[:100])
                 _time.sleep(5 * (attempt + 1) + _random.uniform(0, 3))
                 continue
             raise requests.exceptions.HTTPError(f"{exc}; response={detail}", response=resp) from exc
         except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as exc:
             last_exc = exc
-            print(f"[_call_chat_image_model] attempt {attempt + 1} failed: {exc}")
+            log.warning("[Gemini] 第%d次失败: %s", attempt + 1, str(exc)[:100])
             if attempt < 2:
                 _time.sleep(5 * (attempt + 1) + _random.uniform(0, 3))
                 continue
             raise
         result = resp.json()
+        log.info("[Gemini] 完成 %.1fs 状态=%d", _time.time() - t0, resp.status_code)
         return {
             "b64_json": _extract_b64_from_image_response(result),
             "model": model,
